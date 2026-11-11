@@ -89,11 +89,16 @@ jobs:
           set -euo pipefail
           TAG="v${{ inputs.version }}"
           cd SG_Typer_Studio/desktop
+          FILES=("dist/SG Typer Studio-Setup.exe" "dist/latest.yml")
+          # Full NSIS updates work without differential blockmaps. Include one when a build emits it.
+          if [[ -f "dist/SG Typer Studio-Setup.exe.blockmap" ]]; then
+            FILES+=("dist/SG Typer Studio-Setup.exe.blockmap")
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "dist/SG Typer Studio-Setup.exe" "dist/SG Typer Studio-Setup.exe.blockmap" "dist/latest.yml" --clobber
+            gh release upload "$TAG" "${FILES[@]}" --clobber
             gh release edit "$TAG" --draft=false
           else
-            gh release create "$TAG" "dist/SG Typer Studio-Setup.exe" "dist/SG Typer Studio-Setup.exe.blockmap" "dist/latest.yml" --target "$RELEASE_SHA" --title "SG Typer Studio ${{ inputs.version }}" --generate-notes
+            gh release create "$TAG" "${FILES[@]}" --target "$RELEASE_SHA" --title "SG Typer Studio ${{ inputs.version }}" --generate-notes
           fi
 
       - name: Send the completed release card to Discord
