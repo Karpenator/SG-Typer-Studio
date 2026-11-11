@@ -11,8 +11,8 @@
     "content": "node scripts/build-content.js",
     "start": "npm run content && node scripts/start.js",
     "test": "npm run content && node scripts/test-e2e.js",
-    "dist": "npm run content && electron-builder --win --x64",
-    "dist:win": "npm run content && electron-builder --win --x64",
+    "dist": "npm run content && electron-builder --win --x64 --publish never",
+    "dist:win": "npm run content && electron-builder --win --x64 --publish never",
     "configure:github": "node scripts/configure-github.js",
     "test:unit": "node --test scripts/test-content.js scripts/test-curves.js scripts/test-healing.js scripts/test-navigation.js scripts/test-brushes.js scripts/test-styles-smudge.js scripts/test-actions.js scripts/test-integrations.js scripts/test-updates.js scripts/test-firefly.js scripts/test-firefly-credits.js scripts/test-generative-levels.js scripts/test-profile-migration.js"
   },
