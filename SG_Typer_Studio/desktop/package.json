@@ -1,7 +1,7 @@
 {
   "name": "sg-typer-studio",
   "productName": "SG Typer Studio",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "A Windows desktop workspace for manga and comics typesetters.",
   "author": "Syndicate",
   "license": "UNLICENSED",
@@ -89,7 +89,7 @@
       {
         "provider": "github",
         "owner": "Karpenator",
-        "repo": "Syndicate_Typer_Studio",
+        "repo": "SG-Typer-Studio",
         "releaseType": "release"
       }
     ]
