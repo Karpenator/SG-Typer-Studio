@@ -50,6 +50,17 @@ test("Help opens the official SG Typer Studio Discord invite externally", () => 
   assert.ok(main.includes('if (kind === "https:" || kind === "http:" || kind === "mailto:") shell.openExternal(url);'));
 });
 
+test("Help always shows update checking and no longer contains What's New", () => {
+  const app = read("web/app.js");
+  const help = app.match(/\["Help", \[([\s\S]*?)\]\],/);
+  assert.ok(help, "Help menu exists");
+  assert.ok(!help[1].includes('label: "What\'s New"'));
+  assert.ok(help[1].includes('{ label: "Check for Updates…", action: checkForUpdates }'));
+  assert.ok(!help[1].includes("DesktopUpdates ?"), "the menu item is not hidden by bridge detection");
+  assert.ok(app.includes('window.open(UPDATE_RELEASES, "_blank", "noopener,noreferrer")'));
+  assert.ok(app.includes("https://github.com/Karpenator/SG-Typer-Studio/releases"));
+});
+
 test("touch and pen sliders keep focus until the drag ends", () => {
   const app = read("web/app.js");
   assert.ok(app.includes('event.pointerType === "mouse" || slider.type !== "range"'));

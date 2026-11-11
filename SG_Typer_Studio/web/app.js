@@ -15551,7 +15551,7 @@
 
   const DESKTOP = Boolean(window.TypeRDesktop);
   const DesktopUpdates = window.TypeRDesktop && window.TypeRDesktop.updates;
-  const UPDATE_RELEASES = DesktopUpdates ? DesktopUpdates.releasesUrl : "";
+  const UPDATE_RELEASES = DesktopUpdates ? DesktopUpdates.releasesUrl : "https://github.com/Karpenator/SG-Typer-Studio/releases";
   let updateDownloadTask = null;
   if (DesktopUpdates) DesktopUpdates.onState((state) => {
     if (updateDownloadTask && state.status === "downloading") updateDownloadTask.say(`${T("Downloading update…")} ${Math.floor(state.percent || 0)}%`);
@@ -15596,7 +15596,10 @@
     else if (result.status !== "none") await updateError(result);
   };
   const checkForUpdates = async () => {
-    if (!DesktopUpdates) return;
+    if (!DesktopUpdates) {
+      window.open(UPDATE_RELEASES, "_blank", "noopener,noreferrer");
+      return;
+    }
     const task = background(T("Checking for updates…"));
     let result;
     try { result = await DesktopUpdates.check(); }
@@ -15802,8 +15805,7 @@
     ["Help", [
       { label: "TypeR Tutorial", action: () => (window.TypeRGuide && !Shell.touch ? window.TypeRGuide.show() : startPanel({ tour: true })) },
       { label: "Setup Assistant…", action: () => setupAgain() },
-      { label: "What's New", action: () => window.TypeRWhatsNew && window.TypeRWhatsNew.show() },
-      ...(DesktopUpdates ? [{ label: "Check for Updates…", action: checkForUpdates }] : []),
+      { label: "Check for Updates…", action: checkForUpdates },
       { label: "Keyboard Shortcuts", action: () => showShortcuts() },
       ...(Shell.touch ? [] : [{ label: "SFX Guide", action: () => window.TypeRSFXGuide && window.TypeRSFXGuide.show() }]),
       { label: "Discord", action: () => window.open("https://discord.gg/UVF2264tYn", "_blank", "noopener,noreferrer") },

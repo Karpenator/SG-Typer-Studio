@@ -74,8 +74,12 @@
       ]
     },
     "nsis": {
-      "oneClick": true,
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
       "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SG Typer Studio",
       "deleteAppDataOnUninstall": false,
       "include": "build/installer.nsh",
       "differentialPackage": false,
@@ -85,7 +89,7 @@
       {
         "provider": "github",
         "owner": "Karpenator",
-        "repo": "SG-Typer-Studio",
+        "repo": "Syndicate_Typer_Studio",
         "releaseType": "release"
       }
     ]

@@ -105,6 +105,10 @@ test("desktop packaging is Windows x64 only and retains the legacy plugin scheme
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "desktop", "package.json"), "utf8"));
   assert.equal(pkg.productName, "SG Typer Studio");
   assert.deepEqual(pkg.build.win.target, ["nsis"]);
+  assert.equal(pkg.build.nsis.oneClick, false);
+  assert.equal(pkg.build.nsis.allowToChangeInstallationDirectory, true);
+  assert.equal(pkg.build.nsis.createDesktopShortcut, true);
+  assert.equal(pkg.build.nsis.createStartMenuShortcut, true);
   assert.equal(pkg.build.mac, undefined);
   assert.equal(pkg.build.linux, undefined);
   assert.deepEqual(pkg.build.publish, [{ provider: "github", owner: "Karpenator", repo: "Syndicate_Typer_Studio", releaseType: "release" }]);
