@@ -1,0 +1,196 @@
+{
+  "observed_on": "2026-11-10",
+  "url": "https://gateway.ff.adobe.io/v2/models/discovery?includeFirstParty=true&resolveSchema=true",
+  "method": "Public unauthenticated GET with public x-api-key clio-playground-web; no generation",
+  "response_sha256": "3e337cef51c6ca160181952f1311672958e1c75efb1c3ca1906d86e29f70b7b2",
+  "models": [
+    {
+      "modelId": "firefly-image",
+      "modelVersion": "image4_standard",
+      "name": "Firefly Image 4",
+      "inputMediaUseCase": [
+        "style_reference"
+      ],
+      "references": [
+        {
+          "mediaType": "image",
+          "usageTypes": [
+            "style"
+          ],
+          "maxFileSizeBytes": 104857600
+        }
+      ]
+    },
+    {
+      "modelId": "humain",
+      "modelVersion": "humain_image",
+      "name": "HUMAIN Image 1",
+      "inputMediaUseCase": [
+        "not_supported"
+      ],
+      "references": []
+    },
+    {
+      "modelId": "gemini-flash",
+      "modelVersion": "nano-banana-2",
+      "name": "Gemini 3.0 (Nano Banana Pro)",
+      "inputMediaUseCase": [
+        "style_reference",
+        "editing"
+      ],
+      "references": [
+        {
+          "mediaType": "image",
+          "usageTypes": [
+            "general",
+            "element"
+          ],
+          "maxFileSizeBytes": 20971520
+        }
+      ]
+    },
+    {
+      "modelId": "gemini-flash",
+      "modelVersion": "nano-banana-3",
+      "name": "Gemini 3.1 (with Nano Banana 2)",
+      "inputMediaUseCase": [
+        "style_reference",
+        "editing"
+      ],
+      "references": [
+        {
+          "mediaType": "image",
+          "usageTypes": [
+            "general",
+            "element"
+          ],
+          "maxFileSizeBytes": 20971520
+        }
+      ]
+    },
+    {
+      "modelId": "gemini-flash",
+      "modelVersion": "nano-banana-2026-09",
+      "name": "Gemini Nano Banana 2.1",
+      "inputMediaUseCase": [
+        "style_reference",
+        "editing"
+      ],
+      "references": [
+        {
+          "mediaType": "image",
+          "usageTypes": [
+            "general",
+            "element"
+          ],
+          "maxFileSizeBytes": 20971520
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-image",
+      "modelVersion": "2",
+      "name": "GPT Image 2",
+      "inputMediaUseCase": [
+        "editing",
+        "inpainting",
+        "style_reference"
+      ],
+      "references": [
+        {
+          "mediaType": "image",
+          "usageTypes": [
+            "source",
+            "mask",
+            "element"
+          ],
+          "maxFileSizeBytes": 52428800
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-image",
+      "modelVersion": "gpt-image-2.5-flare",
+      "name": "GPT Image 2.5 Flare",
+      "inputMediaUseCase": [
+        "editing",
+        "inpainting",
+        "style_reference"
+      ],
+      "references": [
+        {
+          "mediaType": "image",
+          "usageTypes": [
+            "source",
+            "mask",
+            "element"
+          ],
+          "maxFileSizeBytes": 52428800
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-image",
+      "modelVersion": "gpt-image-2.5-prism",
+      "name": "GPT Image 2.5 Sunburst",
+      "inputMediaUseCase": [
+        "editing",
+        "inpainting",
+        "style_reference"
+      ],
+      "references": [
+        {
+          "mediaType": "image",
+          "usageTypes": [
+            "source",
+            "mask",
+            "element"
+          ],
+          "maxFileSizeBytes": 52428800
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-image",
+      "modelVersion": "gpt-image-2.6-aurora",
+      "name": "GPT Image 2.6 Sunburst",
+      "inputMediaUseCase": [
+        "editing",
+        "inpainting",
+        "style_reference"
+      ],
+      "references": [
+        {
+          "mediaType": "image",
+          "usageTypes": [
+            "source",
+            "mask",
+            "element"
+          ],
+          "maxFileSizeBytes": 52428800
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-image",
+      "modelVersion": "gpt-image-2.6-star-swirl",
+      "name": "GPT Image 2.6 Flare",
+      "inputMediaUseCase": [
+        "editing",
+        "inpainting",
+        "style_reference"
+      ],
+      "references": [
+        {
+          "mediaType": "image",
+          "usageTypes": [
+            "source",
+            "mask",
+            "element"
+          ],
+          "maxFileSizeBytes": 52428800
+        }
+      ]
+    }
+  ]
+}

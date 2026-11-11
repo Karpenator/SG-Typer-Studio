@@ -1,0 +1,31 @@
+name: Discord release announcement
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to announce (empty = latest release)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    name: Send release card to Discord
+    # The Windows release workflow sends its own card after all installer assets are attached.
+    if: github.event_name != 'release' || github.event.release.author.login != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out announcement script
+        uses: actions/checkout@v4
+
+      - name: Publish Discord announcement
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: node .github/scripts/discord-release.js

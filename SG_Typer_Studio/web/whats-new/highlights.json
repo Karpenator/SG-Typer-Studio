@@ -1,0 +1,90 @@
+{
+  "highlights": [
+    {
+      "id": "text-detection",
+      "at": "2026-11-09T12:00:00+01:00",
+      "icon": "text",
+      "title": { "en": "Automatic text detection", "fr": "Détection automatique du texte" },
+      "text": {
+        "en": "Detect Text finds every letter on the page in seconds. Remove Text then cleans them all: plain backgrounds at once, the art redrawn by Generative Fill.",
+        "fr": "Détecter le texte trouve toutes les lettres de la page en quelques secondes. Effacer le texte les nettoie ensuite : les fonds unis tout de suite, le dessin redessiné par le Remplissage génératif."
+      },
+      "where": { "en": "Select → Text", "fr": "Sélection → Texte" },
+      "credit": {
+        "en": "Thanks to Miller for the work and the API behind it.",
+        "fr": "Merci à Miller pour le travail et l’API qui la font tourner."
+      },
+      "demo": "text-detection.mp4",
+      "poster": "text-detection.webp"
+    },
+    {
+      "id": "generative-fill-local",
+      "at": "2026-11-09T12:00:00+01:00",
+      "icon": "sparkles",
+      "title": { "en": "Generative Fill, with or without a key", "fr": "Remplissage génératif, avec ou sans clé" },
+      "text": {
+        "en": "Select, say what you want, Generate: Nano Banana 2.1 redraws it with your fal.ai or Google key. Without a key, LaMa Manga runs right on your device, and the desktop app adds FLUX.2 Klein 4B and FLUX 3 Klein.",
+        "fr": "Sélectionnez, dites ce que vous voulez, Générer : Nano Banana 2.1 le redessine avec votre clé fal.ai ou Google. Sans clé, LaMa Manga tourne directement sur votre appareil, et l’app de bureau ajoute FLUX.2 Klein 4B et FLUX 3 Klein."
+      },
+      "where": { "en": "Select, then Generative Fill", "fr": "Sélection, puis Remplissage génératif" },
+      "demo": "generative-fill.mp4",
+      "poster": "generative-fill.webp",
+      "covers": ["2426e6b1a4e8"]
+    },
+    {
+      "id": "gradient",
+      "at": "2026-11-09T12:00:00+01:00",
+      "icon": "gradient",
+      "title": { "en": "Gradient", "fr": "Dégradé" },
+      "text": {
+        "en": "Drag across a text or an SFX: its letters take the gradient, their stroke keeps its colour and the text stays editable. Its ends can still be dragged until Enter.",
+        "fr": "Glissez sur un texte ou un SFX : ses lettres prennent le dégradé, leur contour garde sa couleur et le texte reste modifiable. Ses extrémités se déplacent encore jusqu’à Entrée."
+      },
+      "where": { "en": "G", "fr": "G" },
+      "demo": "gradient.mp4",
+      "poster": "gradient.webp"
+    },
+    {
+      "id": "photoshop-bridge",
+      "at": "2026-11-09T12:00:00+01:00",
+      "icon": "swap",
+      "title": { "en": "From SG Typer Studio to Photoshop, and back", "fr": "De SG Typer Studio à Photoshop, et retour" },
+      "text": {
+        "en": "Open in Photoshop, in the TypeR panel’s footer, sends your pages there with the script if you like. In Photoshop, TypeR’s Open in SG Typer Studio brings them back here.",
+        "fr": "Ouvrir dans Photoshop, en bas du panneau TypeR, y envoie vos pages, avec le script si vous voulez. Dans Photoshop, Ouvrir dans SG Typer Studio de TypeR les ramène ici."
+      },
+      "where": { "en": "Desktop app", "fr": "App de bureau" },
+      "covers": ["ed9568f8a74e", "1c4350031d0c", "1c165f48cd5d"]
+    }
+  ],
+  "notes": [
+    {
+      "id": "x-spot-healing",
+      "at": "2026-11-09T12:00:00+01:00",
+      "kind": "feat",
+      "text": "Spot Healing Brush (Shift+J): paint over a spot or a letter, it is filled with what surrounds it",
+      "lang": { "fr": "Correcteur localisé (Maj+J) : peignez sur une tache ou une lettre, elle est remplie avec ce qui l’entoure" }
+    },
+    {
+      "id": "x-color-range",
+      "at": "2026-11-09T12:00:00+01:00",
+      "kind": "feat",
+      "text": "Select a colour across the page with Select → Color Range…",
+      "lang": { "fr": "Sélectionner une couleur dans toute la page avec Sélection → Plage de couleurs…" }
+    },
+    {
+      "id": "x-favourite-fonts",
+      "at": "2026-11-09T12:00:00+01:00",
+      "kind": "feat",
+      "text": "Star your favourite fonts: they come first in the font list, or alone with Show favourites only",
+      "lang": { "fr": "Mettez une étoile à vos polices favorites : elles passent en tête de la liste, ou seules avec Afficher seulement les favoris" }
+    },
+    {
+      "id": "x-tutorial",
+      "at": "2026-11-09T12:00:00+01:00",
+      "kind": "feat",
+      "text": "Help → TypeR Tutorial teaches SG Typer Studio in short lessons, done in the real workspace on a practice chapter",
+      "lang": { "fr": "Aide → Tutoriel de TypeR apprend SG Typer Studio en courtes leçons, faites dans le vrai espace de travail sur un chapitre d’entraînement" }
+    }
+  ]
+}

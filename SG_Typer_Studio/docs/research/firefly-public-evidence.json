@@ -1,0 +1,26 @@
+{
+  "observed_on": "2026-11-10",
+  "method": "Unauthenticated public HTTP GET; static text analysis only; no live generation",
+  "sources": [
+    {
+      "url": "https://firefly.adobe.com/upload/inpaint",
+      "sha256": "7a5d2abafee58b95159d1acd96760f928bda62f51f05801d409726421db101b6",
+      "bytes": 29092
+    },
+    {
+      "url": "https://firefly.adobe.com/spl-static/js/bundle.5f9a610ade251531.min.js",
+      "sha256": "19cff11ea87eb3f4142d7cf68f9b372110013626e2a4b1a3b3de572ebe1fd5ca",
+      "bytes": 1194337
+    },
+    {
+      "url": "https://firefly.adobe.com/spl-static/js/chunk.31b0874c92ce4eaf.min.js",
+      "sha256": "e1e3ddd6eadfa3a76fc5cf8fa9c8b0b2408805f49eed4ae054145363735f9e91",
+      "bytes": 403540
+    },
+    {
+      "url": "https://firefly.adobe.com/spl-static/js/chunk.ec09a1ad0dfc3ed1.min.js",
+      "sha256": "666c937633d78099447dfe8618278dbea953ac6de01df4e8c4c767d869baff21",
+      "bytes": 576532
+    }
+  ]
+}

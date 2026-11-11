@@ -1,0 +1,10 @@
+.DS_Store
+node_modules/
+test-results/
+playwright-report/
+*.tsbuildinfo
+*.log
+
+# Commercial lettering fonts whose redistribution licences are not covered
+assets/fonts/wild-words-*.woff2
+assets/fonts/fight-to-the-finish-*.woff2

@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>SG Typer Studio</title>
+<meta name="robots" content="noindex">
+<link id="topcoat" rel="stylesheet">
+<style id="hostStyle"></style>
+<link href="modern.css" rel="stylesheet">
+<style>
+@font-face { font-family: "Wildjess"; font-weight: 400; font-style: normal; font-display: swap; src: url("../../assets/fonts/wildjess-normal.woff2") format("woff2"); }
+@font-face { font-family: "Wildjess"; font-weight: 400; font-style: italic; font-display: swap; src: url("../../assets/fonts/wildjess-italic.woff2") format("woff2"); }
+@font-face { font-family: "Wildjess"; font-weight: 700; font-style: italic; font-display: swap; src: url("../../assets/fonts/wildjess-bolditalic.woff2") format("woff2"); }
+@font-face { font-family: "Bangers"; font-weight: 400; font-style: normal; font-display: swap; src: url("../../assets/fonts/bangers-400.woff2") format("woff2"); }
+/* One embedded library of styles in the desktop application */
+.profile-settings, .export-section:has(.export-profile-select) { display: none !important; }
+/* Language and updates belong to the desktop application; legacy plugin update controls are
+   disabled in bridge.js. Their titles are removed from search too. */
+.settings-group:has(option[value="en_US"]), .settings-group:has(> .settings-checkbox-grid .settings-checkbox-content > span:empty) { display: none !important; }
+/* The theme is chosen in SG Typer Studio Settings > Appearance, for the whole app: the
+   panel only shows its theme editors, when the app opens them (see app.js) */
+.settings-theme-grid { display: none !important; }
+.settings-group:has(> .settings-theme-grid):not(:has(> .settings-theme-grid + *)) { display: none !important; }
+/* FontScanR: fonts Chromium found on this computer are not missing (see bridge.js) */
+.fsr-item[data-font="found"] .fsr-chip-warn, .fsr-item[data-font="found"] .ffs-web-search { display: none; }
+/* Retired website video guide and Discord support buttons in the plugin Help dialog. The
+   remaining walkthrough and What's New buttons are local. Credits stay visible but not clickable. */
+.help-actions > .help-action:nth-last-child(-n+2) { display: none !important; }
+.help-footer .link { pointer-events: none; text-decoration: none; cursor: default; }
+
+/* The hint sits in a one-line area here, whatever the language's sentence length */
+.styles-empty { overflow: hidden; }
+.styles-empty > span { font-size: 12px; margin: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* On a phone or a tablet the panel opens one part at a time (touch.js sets data-view) */
+html.t-touch .top-divider, html.t-touch .middle-divider { display: none; }
+html[data-view="script"] .top-block, html[data-view="script"] .bottom-block, html[data-view="script"] .footer-block,
+html[data-view="styles"] .top-block, html[data-view="styles"] .tab-bar, html[data-view="styles"] .middle-block, html[data-view="styles"] .footer-block,
+html[data-view="top"] .tab-bar, html[data-view="top"] .middle-block, html[data-view="top"] .bottom-block, html[data-view="top"] .footer-block { display: none !important; }
+html[data-view="styles"] .bottom-block, html[data-view="top"] .top-block { flex: 1 1 0 !important; height: auto !important; min-height: 0; }
+html[data-view="top"] .preview-bottom { min-height: 150px; }
+/* Reading the script: a tap picks a line, and the keyboard only comes when asked for */
+html.t-touch:not(.t-writing) .text-area { pointer-events: none; }
+html.t-touch:not(.t-writing) .text-lines, html.t-touch:not(.t-writing) .text-line { pointer-events: auto; }
+html.t-touch .text-area, html.t-touch .text-area-overlay, html.t-touch .text-row-mirror { font-size: 15px; line-height: 30px; }
+html.t-touch .text-line-num { font-size: 13px; line-height: 30px; }
+html.t-touch .text-line-select > svg, html.t-touch .text-line-insert > svg { top: 2px; }
+html.t-touch .text-message > div { font-size: 16px; }
+/* The panel takes a short window for a small one; here it's a short sheet with all its room */
+html.t-touch .preview-bottom { display: flex !important; }
+html.t-touch .style-btn-list { display: flex !important; }
+html[data-view="all"] .top-block { height: auto !important; }
+html[data-view="all"] .preview-bottom { min-height: 110px; }
+html.t-touch .global-tooltip { display: none !important; }
+/* Fingers */
+html.t-touch button, html.t-touch input, html.t-touch select { touch-action: manipulation; }
+html.t-touch .tab-bar-tab { min-height: 40px; padding: 0 14px; font-size: 14px; }
+html.t-touch .tab-bar-add { min-width: 44px; }
+html.t-touch .tab-bar-close { width: 28px; height: 28px; }
+html.t-touch .preview-top_big-btn, html.t-touch .preview-top_change-size-cont button, html.t-touch .preview-nav button { min-height: 44px; }
+html.t-touch .preview-top .preview-top_size-input { height: 44px; }
+html.t-touch .preview-top .preview-top_size-input input { font-size: 14px; width: 28px; }
+html.t-touch .preview-nav button { min-width: 44px; }
+html.t-touch .preview-textshaper-head { min-height: 36px; }
+html.t-touch .preview-textshaper-pager { gap: 8px; }
+html.t-touch .preview-textshaper-pager button { width: 32px; height: 32px; }
+html.t-touch .preview-textshaper-pager svg { width: 18px; height: 18px; }
+html.t-touch .preview-textshaper-list { min-height: 96px; }
+html.t-touch .folder-header { min-height: 44px; padding: 4px 8px; }
+html.t-touch .folder-title { font-size: 16px; }
+html.t-touch .folder-actions button { width: 36px; height: 36px; }
+html.t-touch .style-item { min-height: 48px; margin-bottom: 6px; padding: 6px 6px 6px 10px; opacity: 1; }
+html.t-touch .style-name { font-size: 16px; letter-spacing: 0; }
+html.t-touch .style-actions { align-items: center; }
+html.t-touch .style-actions button { width: 34px; height: 34px; }
+html.t-touch .style-actions .style-size-preset { width: auto; max-width: 48px; height: 28px; padding: 0 6px; font-size: 12px; line-height: 28px; }
+html.t-touch .style-add { padding: 10px; }
+html.t-touch .style-add button { min-height: 44px; }
+html.t-touch .style-context-menu { width: 240px; }
+html.t-touch .style-context-menu button { min-height: 44px; font-size: 15px; }
+html.t-touch .footer-block { min-height: 48px; gap: 8px; }
+html.t-touch .footer-icon-button { width: 40px; height: 40px; }
+html.t-touch .footer-mode { height: 36px; padding: 0 8px; }
+html.t-touch .app-modal-inner { max-width: 100%; }
+html.t-touch .topcoat-text-input, html.t-touch .topcoat-textarea, html.t-touch .field-input { font-size: 16px; }
+html.t-touch .text-area::selection { background: rgba(40, 142, 223, 0.28); }
+</style>
+</head>
+<body class="hostElt">
+<div id="app"></div>
+<script src="../bridge.js"></script>
+</body>
+</html>

@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="theme-color" content="#232121">
+  <title>SG Typer Studio</title>
+  <meta name="description" content="SG Typer Studio — a Windows desktop workspace for comics and manga typesetting.">
+  <link rel="icon" type="image/png" href="../assets/brand/sg-typer-studio-icon.png">
+  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="sfx.css">
+  <link rel="stylesheet" href="guide.css">
+  <!-- The theme chosen in Settings > Appearance, before anything is drawn (see app.js) -->
+  <script>try { var theme = JSON.parse(localStorage.getItem("typer.web.theme") || "null"); if (theme && theme.properties) { for (var name in theme.properties) document.documentElement.style.setProperty(name, theme.properties[name]); document.documentElement.dataset.theme = theme.mode; document.querySelector('meta[name="theme-color"]').content = theme.properties["--ui-darker"]; } } catch (error) {}</script>
+  <script src="shell.js"></script>
+  <!-- The interface for fingers: a computer loads it only if it ever needs it -->
+  <script>if (window.TypeRShell.touch) document.write('<link rel="stylesheet" href="touch.css">')</script>
+  <script>window.TYPER_SUPPORTED = ["en", "fr", "es", "it", "de", "pt", "ru", "uk", "pl", "nl", "tr", "ar", "vi", "id", "th", "ja", "ko", "zh"]</script>
+  <script src="../i18n.js"></script>
+  <script>if (window.TYPER_I18N.lang !== "en") document.write('<script src="strings/' + window.TYPER_I18N.lang + '.js"><\/script><script src="strings/sfx/' + window.TYPER_I18N.lang + '.js"><\/script><script src="strings/guide/' + window.TYPER_I18N.lang + '.js"><\/script>')</script>
+  <script>document.documentElement.classList.add("js")</script>
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="mbar">
+      <span class="mbar__logo" title="SG Typer Studio"><img src="../assets/brand/sg-logo.png" width="24" height="24" alt="SG"></span>
+      <nav class="mbar__menus" id="menus" role="menubar" aria-label="Menu"></nav>
+      <span class="mbar__title">SG Typer Studio</span>
+      <div class="mbar__end">
+        <select class="mbar__language" id="language" aria-label="Language"></select>
+      </div>
+    </header>
+
+    <div class="obar" id="options" role="toolbar"></div>
+
+    <div class="fontbar" id="fontbar" hidden>
+      <span id="fontbar-text"></span>
+      <button type="button" class="btn btn--main btn--small" id="fontbar-use"></button>
+      <button type="button" class="tab__close" id="fontbar-close">×</button>
+    </div>
+
+    <div class="work" id="work">
+      <aside class="tools" id="tools" role="toolbar" aria-orientation="vertical"></aside>
+
+      <main class="docs">
+        <div class="tabbar" id="tabbar">
+          <div class="tabs" id="tabs" role="tablist"></div>
+          <div class="tabbar__thumb" id="tabs-thumb" aria-hidden="true"></div>
+          <button class="tabbar__more" id="tabs-more" type="button" aria-haspopup="menu" hidden></button>
+          <div class="pager" id="pager" hidden>
+            <button class="pager__step" id="pager-prev" type="button"></button>
+            <button class="pager__at" id="pager-at" type="button" aria-haspopup="menu" aria-expanded="false"></button>
+            <button class="pager__step" id="pager-next" type="button"></button>
+          </div>
+        </div>
+        <div class="stage" id="stage" tabindex="0">
+          <canvas class="stage__canvas" id="canvas"></canvas>
+          <div class="doc-scrollbar doc-scrollbar--horizontal" id="scroll-h" role="scrollbar" aria-orientation="horizontal" tabindex="0" hidden><div class="doc-scrollbar__thumb" id="scroll-h-thumb"></div></div>
+          <div class="doc-scrollbar doc-scrollbar--vertical" id="scroll-v" role="scrollbar" aria-orientation="vertical" tabindex="0" hidden><div class="doc-scrollbar__thumb" id="scroll-v-thumb"></div></div>
+          <div class="doc-scrollbar__corner" id="scroll-corner" aria-hidden="true" hidden></div>
+          <svg class="stage__over" id="over" aria-hidden="true">
+            <g id="over-doc">
+              <path class="ants ants--a" id="ants-a"/>
+              <path class="ants ants--b" id="ants-b"/>
+              <path class="drag" id="drag"/>
+              <path class="drag drag--ants" id="drag-b"/>
+            </g>
+            <g id="over-screen">
+              <g id="text-marks"></g>
+              <g id="type-marks"></g>
+              <rect class="box" id="layer-box" hidden/>
+              <g id="handles"></g>
+              <circle class="brush-ring" id="brush-ring" hidden/>
+            </g>
+          </svg>
+          <textarea class="editor" id="editor" spellcheck="false" hidden></textarea>
+          <div class="brush-preview" id="brush-preview" hidden></div>
+          <canvas class="stamp-preview" id="stamp-preview" hidden></canvas>
+          <div class="spread" id="spread-left" hidden><b>+</b><span></span></div>
+          <div class="spread" id="spread-right" hidden><b>+</b><span></span></div>
+          <div class="hud" id="hud" hidden></div>
+          <div class="ctxbar" id="ctxbar" role="toolbar" hidden></div>
+
+          <div class="start" id="start" hidden>
+            <img src="../assets/brand/sg-logo.png" width="72" height="72" alt="">
+            <h1>SG Typer Studio</h1>
+            <p id="start-text"></p>
+            <div class="start__actions">
+              <button type="button" class="btn btn--main" id="start-open"></button>
+              <button type="button" class="btn" id="start-folder"></button>
+            </div>
+            <div class="start__more">
+              <button type="button" class="start__link" id="start-new"></button>
+              <button type="button" class="start__link" id="start-practice"></button>
+            </div>
+            <div class="start__recent" id="start-recent" hidden></div>
+          </div>
+
+          <div class="drop" id="drop" hidden><span></span></div>
+        </div>
+        <div class="status" id="status">
+          <span class="status__zoom"><input type="text" id="status-zoom" aria-label="Zoom" value="100%"></span>
+          <span id="status-doc"></span>
+          <span class="status__typer" id="status-typer" hidden></span>
+          <span class="status__grow"></span>
+          <span id="status-hint"></span>
+        </div>
+      </main>
+
+      <aside class="dock dock--typer" id="dock-typer">
+        <div class="dock__head"><span>TypeR</span></div>
+        <iframe id="panel-frame" title="TypeR"></iframe>
+      </aside>
+
+      <aside class="dock dock--side" id="dock-side">
+        <section class="pane pane--navigator" id="pane-navigator">
+          <div class="dock__head"><span id="head-navigator"></span></div>
+          <div class="navigator" id="navigator">
+            <div class="navigator__preview" id="navigator-preview">
+              <canvas class="navigator__canvas" id="navigator-canvas"></canvas>
+              <svg class="navigator__frame" id="navigator-frame" aria-hidden="true"><rect id="navigator-viewport"/></svg>
+              <span class="navigator__empty" id="navigator-empty" hidden></span>
+            </div>
+            <div class="navigator__controls">
+              <input class="navigator__zoom" id="navigator-zoom" type="text" aria-label="Zoom" value="100%">
+              <button class="icon-btn" id="navigator-out" type="button" aria-label="Zoom Out">−</button>
+              <input class="navigator__slider" id="navigator-slider" type="range" min="-5.643856" max="5" step="any" value="0" aria-label="Zoom">
+              <button class="icon-btn" id="navigator-in" type="button" aria-label="Zoom In">+</button>
+            </div>
+          </div>
+        </section>
+        <section class="pane pane--styles" id="pane-styles">
+          <div class="dock__head"><span id="head-styles"></span></div>
+          <div class="styles-library" id="styles-library"></div>
+          <div class="styles-foot">
+            <input id="styles-size" type="range" min="32" max="64" step="4" value="44" aria-label="Thumbnail size">
+            <span class="styles-foot__grow"></span>
+            <button class="icon-btn" id="styles-new" type="button" aria-label="New Style" title="New Style">+</button>
+            <button class="icon-btn" id="styles-delete" type="button" aria-label="Delete Style" title="Delete Style"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6 2.5h4M5 4.5l.6 9h4.8l.6-9M7 7v4M9 7v4"/></svg></button>
+          </div>
+        </section>
+        <section class="pane pane--brushes" id="pane-brushes" hidden>
+          <div class="dock__head"><span id="head-brushes"></span></div>
+          <div class="brushes-search"><input id="brushes-search" type="search" autocomplete="off"></div>
+          <div class="brushes-current">
+            <canvas id="brushes-preview" width="240" height="46"></canvas>
+            <strong id="brushes-name"></strong>
+            <small id="brushes-meta"></small>
+          </div>
+          <div class="brushes-list" id="brushes-list"></div>
+          <div class="brushes-foot" role="toolbar">
+            <input id="brushes-size" type="range" min="36" max="72" step="4" value="48" aria-label="Brush thumbnail size">
+            <span class="brushes-foot__grow"></span>
+            <button class="icon-btn" id="brushes-import" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 11V2M5 5l3-3 3 3M3 9v5h10V9"/></svg></button>
+            <button class="icon-btn" id="brushes-delete" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6 2.5h4M5 4.5l.6 9h4.8l.6-9M7 7v4M9 7v4"/></svg></button>
+            <input id="brushes-file" type="file" accept=".abr,application/octet-stream" multiple hidden>
+          </div>
+        </section>
+        <section class="pane pane--actions" id="pane-actions" hidden>
+          <div class="dock__head"><span id="head-actions"></span></div>
+          <div class="actions-status" id="actions-status" hidden></div>
+          <div class="actions-list" id="actions-list"></div>
+          <div class="actions-foot" role="toolbar">
+            <button class="icon-btn" id="actions-stop" type="button" aria-label="Stop" title="Stop"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8"/></svg></button>
+            <button class="icon-btn" id="actions-record" type="button" aria-label="Start Recording" title="Start Recording"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4"/></svg></button>
+            <button class="icon-btn" id="actions-play" type="button" aria-label="Play" title="Play"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 7 5-7 5z"/></svg></button>
+            <span class="actions-foot__grow"></span>
+            <button class="icon-btn" id="actions-new-set" type="button" aria-label="New Set" title="New Set"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 5h5l1.5 2H14v6H2zM11 2v4M9 4h4"/></svg></button>
+            <button class="icon-btn" id="actions-new" type="button" aria-label="New Action" title="New Action">+</button>
+            <button class="icon-btn" id="actions-delete" type="button" aria-label="Delete" title="Delete"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6 2.5h4M5 4.5l.6 9h4.8l.6-9M7 7v4M9 7v4"/></svg></button>
+          </div>
+        </section>
+        <section class="pane pane--layers" id="pane-layers">
+          <div class="dock__head"><span id="head-layers"></span></div>
+          <div class="layers__tools" id="layers-tools"></div>
+          <ul class="layers" id="layers" role="listbox"></ul>
+          <div class="layers__foot" id="layers-foot"></div>
+        </section>
+        <section class="pane pane--character" id="pane-character">
+          <div class="dock__head"><span id="head-character"></span></div>
+          <div class="character" id="character"></div>
+        </section>
+        <section class="pane pane--sfx" id="pane-sfx">
+          <div class="dock__head"><span id="head-sfx">SFX</span></div>
+          <div class="character sfx" id="sfx"></div>
+        </section>
+        <section class="pane pane--breaks breaks" id="breaks">
+          <div class="dock__head"><span id="breaks-title"></span></div>
+          <div class="breaks__tools">
+            <button type="button" class="icon-btn" id="breaks-fewer">−</button>
+            <span class="breaks__count" id="breaks-count"></span>
+            <button type="button" class="icon-btn" id="breaks-more">+</button>
+            <button type="button" class="icon-btn" id="breaks-balance"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 4h5M3 8h10M5.5 12h5"/></svg></button>
+            <button type="button" class="icon-btn touch-only" id="breaks-cut" aria-pressed="false"></button>
+            <select id="breaks-language"></select>
+            <button type="button" class="breaks__help" id="breaks-help">?</button>
+          </div>
+          <div class="breaks__lines" id="breaks-lines"><div class="breaks__text" id="breaks-text"></div></div>
+          <p class="breaks__empty" id="breaks-empty" hidden></p>
+          <p class="breaks__hint" id="breaks-hint"></p>
+          <div class="breaks__caret" id="breaks-caret" hidden><span class="breaks__badge" id="breaks-badge"></span></div>
+        </section>
+        <section class="pane pane--history" id="pane-history">
+          <div class="dock__head"><span id="head-history"></span></div>
+          <ol class="history" id="history"></ol>
+        </section>
+      </aside>
+    </div>
+
+    <header class="tbar t-only" id="t-bar"></header>
+    <div class="tbottom t-only" id="t-bottom"></div>
+    <nav class="tnav t-only" id="t-nav"></nav>
+    <section class="sheet t-only" id="t-sheet"></section>
+  </div>
+
+  <div class="busy" id="busy" role="status" hidden></div>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <dialog class="modal" id="modal"></dialog>
+  <input type="file" id="file-open" accept=".psd,.psb,.idml,.indd,.indt,image/png,image/jpeg,image/webp" multiple hidden>
+  <input type="file" id="file-fonts" accept=".ttf,.otf,.ttc,.otc,.woff,.woff2" multiple hidden>
+  <input type="file" id="file-kit" accept=".zip,.json" multiple hidden>
+
+  <noscript><p>SG Typer Studio needs JavaScript.</p></noscript>
+
+  <script>window.TYPER_I18N.apply()</script>
+  <script src="keyclick.js"></script>
+  <script src="fonts.js"></script>
+  <script src="fontfinder.js"></script>
+  <script src="kit.js"></script>
+  <script src="inpaint.js"></script>
+  <script src="healing.js"></script>
+  <script src="photoshop.js"></script>
+  <script src="psd.js"></script>
+  <script src="indesign.js"></script>
+  <script src="session.js"></script>
+  <script src="recent.js"></script>
+  <script src="workspace.js"></script>
+  <script src="styles.js"></script>
+  <script src="brushes.js"></script>
+  <script src="actions.js"></script>
+  <script src="generative.js"></script>
+  <script src="textmask.js"></script>
+  <script src="whats-new.js"></script>
+  <script src="onboarding.js"></script>
+  <script src="curves.js"></script>
+  <script src="app.js"></script>
+  <script src="sfx.js"></script>
+  <script src="retouch.js"></script>
+  <script src="reshape.js"></script>
+  <script src="reshape-tool.js"></script>
+  <script src="sfx-guide.js"></script>
+  <script src="guide.js"></script>
+  <script src="hyphenation.js"></script>
+  <script src="breaks.js"></script>
+  <script>
+    (function () {
+      var Shell = window.TypeRShell;
+      if (Shell.touch) {
+        document.write('<script src="touch.js"><\/script>');
+        return;
+      }
+      var loaded = false;
+      Shell.onChange(function () {
+        if (!Shell.touch || loaded) return;
+        loaded = true;
+        var style = document.createElement("link");
+        style.rel = "stylesheet";
+        style.href = "touch.css";
+        style.onload = style.onerror = function () {
+          var script = document.createElement("script");
+          script.src = "touch.js";
+          document.body.appendChild(script);
+        };
+        document.head.appendChild(style);
+      });
+    })();
+  </script>
+</body>
+</html>

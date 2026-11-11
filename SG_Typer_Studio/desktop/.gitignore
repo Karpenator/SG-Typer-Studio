@@ -1,0 +1,5 @@
+node_modules/
+dist/
+# Embedded renderer made by scripts/build-content.js
+content/
+test-output/

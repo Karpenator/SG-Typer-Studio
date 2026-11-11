@@ -1,0 +1,12 @@
+/* The menu bar becomes the window's title bar in SG Typer Studio. Only that app loads this file. */
+
+.desktop .mbar { -webkit-app-region: drag; user-select: none; }
+.desktop .mbar button,
+.desktop .mbar select,
+.desktop .mbar a[href],
+.desktop .mbar__menus,
+.desktop .menu__list { -webkit-app-region: no-drag; }
+.desktop .mbar__logo { pointer-events: none; }
+
+/* Windows' buttons take the right end of the bar */
+.desktop--windows .mbar { padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 8px); }

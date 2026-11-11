@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Windows command files keep native line endings on every checkout.
+*.bat text eol=crlf
+*.cmd text eol=crlf
