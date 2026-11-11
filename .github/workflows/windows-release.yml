@@ -44,6 +44,23 @@ jobs:
           npm run configure:github -- "https://github.com/${{ github.repository }}"
           npm version "${{ inputs.version }}" --no-git-tag-version --allow-same-version
 
+      - name: Load matching release notes
+        id: release_notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Enter a semantic version such as 0.1.4."
+            exit 1
+          fi
+          FILE=".github/workflows/release-notes/${VERSION}.md"
+          if [[ ! -s "$FILE" ]]; then
+            echo "Create $FILE with the changes for this version before running the release."
+            exit 1
+          fi
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+
       - name: Install locked dependencies
         working-directory: SG_Typer_Studio/desktop
         run: npm ci
@@ -85,20 +102,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ steps.release_commit.outputs.sha }}
+          NOTES_FILE: ${{ steps.release_notes.outputs.file }}
         run: |
           set -euo pipefail
           TAG="v${{ inputs.version }}"
-          cd SG_Typer_Studio/desktop
-          FILES=("dist/SG Typer Studio-Setup.exe" "dist/latest.yml")
+          FILES=("SG_Typer_Studio/desktop/dist/SG Typer Studio-Setup.exe" "SG_Typer_Studio/desktop/dist/latest.yml")
           # Full NSIS updates work without differential blockmaps. Include one when a build emits it.
-          if [[ -f "dist/SG Typer Studio-Setup.exe.blockmap" ]]; then
-            FILES+=("dist/SG Typer Studio-Setup.exe.blockmap")
+          if [[ -f "SG_Typer_Studio/desktop/dist/SG Typer Studio-Setup.exe.blockmap" ]]; then
+            FILES+=("SG_Typer_Studio/desktop/dist/SG Typer Studio-Setup.exe.blockmap")
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${FILES[@]}" --clobber
-            gh release edit "$TAG" --draft=false
+            gh release edit "$TAG" --draft=false --notes-file "$NOTES_FILE"
           else
-            gh release create "$TAG" "${FILES[@]}" --target "$RELEASE_SHA" --title "SG Typer Studio ${{ inputs.version }}" --generate-notes
+            gh release create "$TAG" "${FILES[@]}" --target "$RELEASE_SHA" --title "SG Typer Studio ${{ inputs.version }}" --notes-file "$NOTES_FILE"
           fi
 
       - name: Send the completed release card to Discord
