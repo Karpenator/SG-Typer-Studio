@@ -42,7 +42,7 @@ jobs:
         working-directory: SG_Typer_Studio/desktop
         run: |
           npm run configure:github -- "https://github.com/${{ github.repository }}"
-          npm version "${{ inputs.version }}" --no-git-tag-version
+          npm version "${{ inputs.version }}" --no-git-tag-version --allow-same-version
 
       - name: Install locked dependencies
         working-directory: SG_Typer_Studio/desktop
