@@ -1,6 +1,11 @@
 {
-  "github": "https://api.github.com/repos/Karpenator/Syndicate_Typer_Studio/commits?per_page=1",
+  "github": "https://api.github.com/repos/Karpenator/SG-Typer-Studio/commits?per_page=1",
   "notes": [
-    {"id":"sg-windows-rebrand","at":"2026-11-10T00:00:00Z","kind":"feat","text":"SG Typer Studio is now a Windows-only desktop application with a fully embedded interface, a new SG identity, and no website, PWA, or remote interface updates."}
+    {
+      "id": "sg-windows-rebrand",
+      "at": "2026-11-10T00:00:00Z",
+      "kind": "feat",
+      "text": "SG Typer Studio is now a Windows-only desktop application with a fully embedded interface, a new SG identity, and no website, PWA, or remote interface updates."
+    }
   ]
 }
