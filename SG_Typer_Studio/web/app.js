@@ -79,6 +79,8 @@
   /* ------------------------------- icons ------------------------------- */
 
   const SVG = (inner) => `<svg viewBox="0 0 24 24" aria-hidden="true">${inner}</svg>`;
+  // A slim wand with its sparkle concentrated at the tip, as in Photoshop's Magic Wand.
+  const wandPaths = (sparkFill = "none") => `<path d="M3 21 16.8 7.2"/><path d="m12.2 8.2 4 4"/><path d="M18 1 19.2 4 22.5 5.2 19.2 6.4 18 10 16.8 6.4 13.5 5.2 16.8 4Z" fill="${sparkFill}" stroke="none"/><path d="M22 11v3m-1.5-1.5h3"/>`;
   // The tools' icons are Lucide's (lucide.dev, ISC, see vendor/LICENSE-lucide.txt), or drawn on its grid when it has none:
   // ellipse, polygon, clean, sfx
   const ICON = {
@@ -87,7 +89,7 @@
     ellipse: SVG('<ellipse cx="12" cy="12" rx="10" ry="7" pathLength="40" stroke-dasharray="1.150 2.850"/>'),
     lasso: SVG('<path d="M3.704 14.467a10 8 0 1 1 3.115 2.375"/> <path d="M7 22a5 5 0 0 1-2-3.994"/> <circle cx="5" cy="16" r="2"/>'),
     polygon: SVG('<path d="M3.700 14.500 2 8l7-6 11 1.500 2 7.500-8 7-7.200-1.200"/><path d="M7 22a5 5 0 0 1-2-4"/><circle cx="5" cy="16" r="2"/>'),
-    wand: SVG('<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/> <path d="m14 7 3 3"/> <path d="M5 6v4"/> <path d="M19 14v4"/> <path d="M10 2v2"/> <path d="M7 8H3"/> <path d="M21 16h-4"/> <path d="M11 3H9"/>'),
+    wand: SVG(wandPaths("currentColor")),
     brush: SVG('<path d="m11 10 3 3"/> <path d="M6.5 21A3.5 3.5 0 1 0 3 17.5a2.62 2.62 0 0 1-.708 1.792A1 1 0 0 0 3 21z"/> <path d="M9.969 17.031 21.378 5.624a1 1 0 0 0-3.002-3.002L6.967 14.031"/>'),
     eraser: SVG('<path d="M21 21H8a2 2 0 0 1-1.42-.587l-3.994-3.999a2 2 0 0 1 0-2.828l10-10a2 2 0 0 1 2.829 0l5.999 6a2 2 0 0 1 0 2.828L12.834 21"/> <path d="m5.082 11.09 8.828 8.828"/>'),
     // Lucide's eraser, with the sparkles of its wand-sparkles in the corner left free
@@ -6385,11 +6387,11 @@
     const ink = lightness >= 150 ? "#000000" : "#ffffff";
     const paths = {
       crosshair: '<path d="M12 2v7m0 6v7M2 12h7m6 0h7"/>',
-      wand: '<path d="m4 20 11-11m-2-2 4 4m1-9v4m-4-2h4m-1 5 2 2m-8-9-2 2"/>',
+      wand: wandPaths(ink),
       eyedropper: '<path d="m12 9-8.4 8.4A2 2 0 0 0 3 18.8v1.4a2 2 0 0 0-.6 1.4 2 2 0 0 0 1.4.6h1.4a2 2 0 0 0 1.4-.6L15 12m3-3 .4.4a1 1 0 1 1-3 3l-3.8-3.8a1 1 0 1 1 3-3l.4.4 3.4-3.4a1 1 0 1 1 3 3zM2 22l.4-.4"/>',
     };
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${ink}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${paths[kind] || paths.crosshair}</svg>`;
-    const hotspot = kind === "crosshair" ? "12 12" : kind === "wand" ? "4 20" : "2 22";
+    const hotspot = kind === "crosshair" ? "12 12" : kind === "wand" ? "18 5" : "2 22";
     return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${hotspot}, crosshair`;
   };
   const showAdaptiveCursor = (event) => {

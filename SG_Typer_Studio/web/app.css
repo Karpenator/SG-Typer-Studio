@@ -230,7 +230,7 @@ input[type="range"]:disabled::-moz-range-thumb { background: var(--muted); }
 /* Two fingers zooming on a touch screen: the page alone, to see the text as it will be */
 .stage.is-pinching #over-screen { visibility: hidden; }
 .stage[data-tool="magicEraser"], .stage[data-tool="clean"], .stage[data-tool="rectangle"], .stage[data-tool="ellipse"], .stage[data-tool="lasso"], .stage[data-tool="polygon"], .stage[data-tool="crop"] { cursor: crosshair; }
-.stage[data-tool="wand"] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 20 11-11m-2-2 4 4m1-9v4m-4-2h4m-1 5 2 2m-8-9-2 2'/%3E%3C/svg%3E") 4 20, crosshair; }
+.stage[data-tool="wand"] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 21 16.8 7.2'/%3E%3Cpath d='m12.2 8.2 4 4'/%3E%3Cpath d='M18 1 19.2 4 22.5 5.2 19.2 6.4 18 10 16.8 6.4 13.5 5.2 16.8 4Z' fill='%23000' stroke='none'/%3E%3Cpath d='M22 11v3m-1.5-1.5h3'/%3E%3C/svg%3E") 18 5, crosshair; }
 .stage[data-tool="move"] { cursor: move; }
 .stage[data-tool="text"] { cursor: text; }
 .stage[data-tool="hand"], .stage.is-spacing { cursor: grab; }

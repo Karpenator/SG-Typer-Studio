@@ -330,7 +330,7 @@
     geometry = { columns: {}, docs: null, width: W, height: H };
 
     let from = 0;
-    let to = rail.hidden ? W : W - RAIL;
+    let to = W;
     let top = 0;
     let bottom = H;
     const tools = element("tools");
@@ -358,7 +358,7 @@
 
     // Columns give way before the page does
     const wanted = COLUMNS.map((name) => (shownIn(name).length ? layout.columns[name].width : 0));
-    const total = wanted.reduce((sum, width) => sum + (width ? width + SPLIT : 0), 0);
+    const total = wanted.reduce((sum, width) => sum + (width ? width + SPLIT : 0), RAIL + SPLIT);
     const room = to - from - MIN_DOCS;
     const ratio = total > room && total > 0 ? Math.max(0.3, room / total) : 1;
     const [leftW, rightW] = wanted.map((width) => Math.round(width * ratio));
@@ -369,16 +369,18 @@
       addSplit("v", from + leftW, top, SPLIT, tall, widthSplit("left", 1));
       docsFrom = from + leftW + SPLIT;
     }
+    // The rail belongs between the document and the full right-hand window dock.
+    const railX = to - rightW - (rightW ? SPLIT : 0) - RAIL;
+    docsTo = railX - SPLIT;
     if (rightW) {
       stack("right", to - rightW, rightW, top, tall);
       addSplit("v", to - rightW - SPLIT, top, SPLIT, tall, widthSplit("right", -1));
-      docsTo = to - rightW - SPLIT;
     }
     place(docs, docsFrom, top, docsTo - docsFrom, tall);
     geometry.docs = { x: docsFrom, w: docsTo - docsFrom };
     geometry.to = to;
-    geometry.rail = { x: to, w: rail.hidden ? 0 : RAIL };
-    place(rail, to, 0, RAIL, H);
+    geometry.rail = { x: railX, w: RAIL };
+    place(rail, railX, 0, RAIL, H);
     renderRail();
     if (layout.railOpen && !layout.hidden[layout.railOpen]) {
       const id = layout.railOpen;
@@ -386,10 +388,10 @@
       const index = layout.rail.filter((item) => !layout.hidden[item]).indexOf(id);
       const rect = layout.railRects[id] || {};
       const el = element(id);
-      const width = Math.min(rect.w || layout.heights[id] && MIN[id][0] * 1.5 || 320, Math.max(180, to - from - 40));
+      const width = Math.min(rect.w || layout.heights[id] && MIN[id][0] * 1.5 || 320, Math.max(180, railX - from - 40));
       const height = Math.min(rect.h || layout.heights[id] || 300, Math.max(HEAD + 20, tall));
       const buttonY = button ? button.offsetTop + button.offsetHeight / 2 : index * RAIL_STEP + RAIL_STEP / 2;
-      const x = clamp(rect.x == null ? to - 5 - width : rect.x, Math.max(0, from), Math.max(0, to - width - 5));
+      const x = clamp(rect.x == null ? railX - 5 - width : rect.x, Math.max(0, from), Math.max(0, railX - width - 5));
       const y = clamp(rect.y == null ? buttonY - height / 2 : rect.y, top, Math.max(top, bottom - height));
       place(el, x, y, width, height);
       el.style.zIndex = "40";
@@ -470,7 +472,6 @@
     const W = geometry.width;
     if (id === "tools") {
       if (x < 56) return { tools: "left", rect: { x: 0, y: 0, w: TOOLS, h: H } };
-      if (x > geometry.to && !rail.hidden) return { tools: "right", rect: { x: geometry.to - TOOLS, y: 0, w: TOOLS, h: H } };
       if (x > W - 56) return { tools: "right", rect: { x: W - TOOLS, y: 0, w: TOOLS, h: H } };
       if (y < 40) return { tools: "top", rect: { x: 0, y: 0, w: W, h: TOOLS } };
       if (y > H - 40) return { tools: "bottom", rect: { x: 0, y: H - TOOLS, w: W, h: TOOLS } };
@@ -478,13 +479,13 @@
     }
     const top = geometry.top || 0;
     const bottom = geometry.bottom || H;
-    if (!rail.hidden && x >= geometry.to) return { rail: true, rect: { x: geometry.to + 4, y: top + 4, w: RAIL - 8, h: bottom - top - 8 } };
+    if (x >= geometry.rail.x && x <= geometry.rail.x + geometry.rail.w) return { rail: true, rect: { x: geometry.rail.x + 4, y: top + 4, w: RAIL - 8, h: bottom - top - 8 } };
     const edge = 36;
     const emptyOf = (name) => !geometry.columns[name] || !geometry.columns[name].parts.some((part) => part.id !== id);
     if (emptyOf("left") && !geometry.columns.left && x >= geometry.docs.x && x < geometry.docs.x + edge) {
       return { column: "left", before: null, rect: { x: geometry.docs.x, y: top, w: edge, h: bottom - top } };
     }
-    if (!geometry.columns.right && x > geometry.to - edge) return { column: "right", before: null, rect: { x: geometry.to - edge, y: top, w: edge, h: bottom - top } };
+    if (!geometry.columns.right && x >= geometry.rail.x - edge && x < geometry.rail.x) return { column: "right", before: null, rect: { x: geometry.rail.x - edge, y: top, w: edge, h: bottom - top } };
     for (const name of COLUMNS) {
       const column = geometry.columns[name];
       if (!column || x < column.x || x > column.x + column.w) continue;
