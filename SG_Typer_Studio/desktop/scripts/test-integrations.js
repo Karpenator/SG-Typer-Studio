@@ -144,6 +144,9 @@ test("Magic Wand and selection cursors are distinct and contrast with the page b
   assert.ok(app.includes('app.tool === "wand" ? "wand" : "crosshair"'));
   assert.ok(app.includes('docCanvas.getContext("2d").getImageData(x, y, 1, 1).data'));
   assert.ok(app.includes('lightness >= 150 ? "#000000" : "#ffffff"'));
+  assert.ok(app.includes('wand: SVG(wandPaths("currentColor"))'), "toolbar uses the Photoshop-like tipped wand");
+  assert.ok(app.includes('kind === "wand" ? "18 5"'), "the cursor hotspot is the wand's sparkling tip");
+  assert.ok(css.includes("fill='%23000' stroke='none'") && css.includes(') 18 5, crosshair'));
 });
 
 test("Help opens the official SG Typer Studio Discord invite externally", () => {

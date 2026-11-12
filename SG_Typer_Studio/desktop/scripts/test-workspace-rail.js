@@ -176,12 +176,17 @@ test("Version 1 docks migrate without losing or duplicating panels", () => {
   assert.ok(saved.columns.right.panels.includes("color"), "new Color panel is added to an old layout");
 });
 
-test("Rail icon opens and closes one persistent left-hand flyout", () => {
+test("Rail sits between the document and right dock; its icon toggles one persistent flyout", () => {
   const run = workspace();
+  const rail = run.elements.work.children.find((item) => item.id === "workspace-rail");
+  const railRight = parseFloat(rail.style.left) + parseFloat(rail.style.width);
+  assert.ok(railRight <= parseFloat(run.elements["dock-typer"].style.left), "rail is left of the full right-hand window dock");
+  const docs = run.elements.work.children.find((item) => item.id === "docs");
+  assert.ok(parseFloat(docs.style.left) + parseFloat(docs.style.width) <= parseFloat(rail.style.left), "document remains left of the rail");
   run.clickRail("styles");
   assert.equal(run.elements["pane-styles"].hidden, false);
   assert.ok(run.elements["pane-styles"].classList.contains("is-rail-flyout"));
-  assert.ok(parseFloat(run.elements["pane-styles"].style.left) + parseFloat(run.elements["pane-styles"].style.width) < 1400);
+  assert.ok(parseFloat(run.elements["pane-styles"].style.left) + parseFloat(run.elements["pane-styles"].style.width) < parseFloat(rail.style.left));
   let saved = run.saved();
   assert.equal(saved.railOpen, "styles");
   assert.ok(saved.rail.includes("styles"));
@@ -201,8 +206,10 @@ test("Dragging a docked Color panel to the rail removes its old dock and opens i
   const box = panel.getBoundingClientRect();
   const event = { button: 0, clientX: box.left + 30, clientY: box.top + 10, target: head, preventDefault() {} };
   head.fire("pointerdown", event);
-  for (const listener of run.listeners.pointermove || []) listener({ clientX: 1390, clientY: 80 });
-  for (const listener of run.listeners.pointerup || []) listener({ clientX: 1390, clientY: 80 });
+  const rail = run.elements.work.children.find((item) => item.id === "workspace-rail");
+  const railX = parseFloat(rail.style.left) + 20;
+  for (const listener of run.listeners.pointermove || []) listener({ clientX: railX, clientY: 80 });
+  for (const listener of run.listeners.pointerup || []) listener({ clientX: railX, clientY: 80 });
   const saved = run.saved();
   assert.ok(saved.rail.includes("color"));
   assert.equal(saved.railOpen, "color");
