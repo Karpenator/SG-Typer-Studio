@@ -4070,7 +4070,9 @@
   // With a selection and no text picked, the bar offers Generative Fill, as in Photoshop: a
   // prompt, or none to take the text out and redraw what it hid. The picture comes from the
   // person's own key, at Google (Gemini) or fal.ai, and lands on a new layer, aligned on the page.
-  const gen = { open: false, prompt: "", focus: false };
+  // Start with Photoshop's full Generative Fill controls beside a new selection. Collapsing them
+  // with Back still lasts for this session, but an update/restart never hides the prompt by default.
+  const gen = { open: true, prompt: "", focus: false };
   // A price in dollars, as the services bill it: cents, or a tenth of a cent for the cheap ones
   const money = (usd) => {
     const digits = usd >= 0.1 ? 2 : usd >= 0.01 ? 3 : 4;

@@ -330,3 +330,11 @@ test("OpenRouter uses its dedicated Image API with an input reference; custom lo
   assert.ok(source.includes("const headers = key ? { Authorization: `Bearer ${key}` } : {};"));
   assert.ok(source.includes("/^data:(image\\/[\\w.+-]+);base64,(.+)$/s"));
 });
+
+test("a new selection starts with the full Generative Fill prompt and controls", () => {
+  const source = read("web/app.js");
+  assert.ok(source.includes('const gen = { open: true, prompt: "", focus: false };'), "the prompt must not start collapsed after an update");
+  assert.ok(source.includes("taskBar.append(back, modelPick, input, go, settingsButton, separator(), deselect, separator(), hide);"));
+  assert.ok(source.includes('iconButton("settings", T("Generative Fill settings")'));
+  assert.ok(source.includes('const setTaskBar = (on) =>'));
+});
