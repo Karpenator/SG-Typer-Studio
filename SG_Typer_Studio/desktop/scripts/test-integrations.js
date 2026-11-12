@@ -50,6 +50,47 @@ test("Action sets and actions have persistent keyboard shortcuts and a desktop f
   assert.ok(main.includes('ipcMain.handle("actions-save"'));
 });
 
+test("the Photoshop engine evaluates and keeps its public text helpers", () => {
+  const context2d = new Proxy({}, {
+    get(target, key) {
+      if (key === "measureText") return (text) => ({ width: String(text).length * 8 });
+      if (key === "createLinearGradient" || key === "createRadialGradient") return () => ({ addColorStop() {} });
+      if (key === "getImageData") return (x, y, width = 1, height = 1) => ({ data: new Uint8ClampedArray(width * height * 4), width, height });
+      return target[key] || (() => {});
+    },
+    set(target, key, value) { target[key] = value; return true; },
+  });
+  const fonts = new Proxy({ BUILTIN: [], generation: 0 }, {
+    get(target, key) {
+      if (key in target) return target[key];
+      if (key === "resolve") return () => ({ css: "Wildjess", weight: 400 });
+      if (key === "withoutLigatures") return () => null;
+      if (key === "list") return () => [];
+      return () => {};
+    },
+  });
+  const window = {
+    TypeRFonts: fonts,
+    TYPER_I18N: { lang: "en" },
+    addEventListener() {}, removeEventListener() {}, dispatchEvent() {},
+    localStorage: { getItem: () => null, setItem: () => {} },
+  };
+  const document = {
+    createElement: () => ({ getContext: () => context2d, width: 0, height: 0 }),
+    addEventListener() {}, removeEventListener() {},
+  };
+  const sandbox = {
+    window, document, console, localStorage: window.localStorage,
+    ImageData: class {}, Image: class {}, Path2D: class {}, DOMMatrixReadOnly: class {}, OffscreenCanvas: class {},
+    URL, TextEncoder, TextDecoder, Uint8Array, Uint8ClampedArray, ArrayBuffer, Blob,
+    requestAnimationFrame() {}, cancelAnimationFrame() {}, setTimeout, clearTimeout,
+  };
+  vm.runInNewContext(read("web/photoshop.js"), sandbox);
+  assert.ok(window.TypeRPhotoshop, "the complete engine must evaluate without missing exports");
+  assert.equal(typeof window.TypeRPhotoshop.wrapWords, "function");
+  assert.deepEqual(Array.from(window.TypeRPhotoshop.wrapWords("one two three", { size: 12 }, 40, 72)), ["one", "two", "three"]);
+});
+
 test("TypeR Block and Short follow Photoshop's paragraph-to-point insertion pipeline", () => {
   const engine = read("web/photoshop.js");
   assert.ok(engine.includes("createTextLayerInSelection(data, point)"), "the panel's point argument must reach the host");
@@ -59,7 +100,8 @@ test("TypeR Block and Short follow Photoshop's paragraph-to-point insertion pipe
   assert.ok(engine.includes('lt.textShape = [{ textType: "point", orientation: "horizontal" }];\n    } else {\n      // Photoshop then fits the paragraph box vertically'), "only Short converts the laid-out paragraph to point text");
   assert.ok(engine.includes("const rows = layout.wrapped.map((runs) => ({ runs }));"), "Short preserves the actual renderer's soft wraps");
   assert.ok(engine.includes("lt.textStyleRange = rangesOfLines(rows, base);"), "inserted line breaks preserve rich-text ranges");
-  assert.ok(!engine.includes("const wrapWords ="), "insertion no longer uses a second, divergent line-wrapper");
+  assert.ok(engine.includes("const wrapWords ="), "the independent public wrapping helper remains available");
+  assert.ok(!/classicParams[\s\S]*?const lines = wrapWords/.test(engine), "classic insertion uses the renderer's layout rather than the helper");
 });
 
 test("What is New follows GitHub and About credits the original projects", () => {

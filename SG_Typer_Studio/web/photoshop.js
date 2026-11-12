@@ -10330,6 +10330,26 @@
     return params;
   };
 
+  // A standalone measuring helper also used by app.js and the text tools. Classic TypeR
+  // insertion now uses relativeLayout directly, but this public helper must remain available.
+  const wrapWords = (text, base, width, resolution) => {
+    const size = sizePxOf(base, resolution);
+    setRunFont(measureCtx, base, size);
+    const out = [];
+    String(text || "").split(/\r\n?|\n/).forEach((paragraph) => {
+      let line = "";
+      paragraph.split(/\s+/).filter(Boolean).forEach((word) => {
+        const candidate = line ? line + " " + word : word;
+        if (line && measureCtx.measureText(candidate).width > width) {
+          out.push(line);
+          line = word;
+        } else line = candidate;
+      });
+      out.push(line);
+    });
+    return out;
+  };
+
   // Moves a layer so the middle of its ink lands on (x, y)
   const centreLayer = (doc, params, stroke, x, y) => {
     const box = layoutLayer({ params, stroke }, doc).box;
