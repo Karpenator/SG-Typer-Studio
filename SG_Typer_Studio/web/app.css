@@ -898,6 +898,17 @@ input[type="range"].color-panel__hue:hover::-moz-range-thumb, input[type="range"
 .about__credit { margin: 0 !important; }
 .about__credit a { color: var(--blue); font-weight: 600; }
 .modal__body ul { margin: 0; padding-left: 18px; max-height: 40vh; overflow-y: auto; }
+.update-notes { max-height: 300px; padding-right: 5px; overflow: auto; color: var(--text); line-height: 1.45; overflow-wrap: anywhere; }
+.update-notes--plain { white-space: pre-wrap; }
+.modal__body .update-notes h1, .modal__body .update-notes h2, .modal__body .update-notes h3, .modal__body .update-notes h4 { margin: 13px 0 7px; color: var(--strong); font-size: 16px; line-height: 1.25; }
+.modal__body .update-notes h1:first-child, .modal__body .update-notes h2:first-child, .modal__body .update-notes h3:first-child, .modal__body .update-notes h4:first-child { margin-top: 0; }
+.modal__body .update-notes p { margin: 0 0 8px; }
+.modal__body .update-notes ul, .modal__body .update-notes ol { max-height: none; margin: 0 0 10px; padding-left: 21px; overflow: visible; }
+.modal__body .update-notes li { margin: 0 0 6px; padding-left: 2px; }
+.modal__body .update-notes pre { padding: 7px; overflow-x: auto; white-space: pre-wrap; background: var(--ui-dark); }
+.modal__body .update-notes code { font-family: ui-monospace, monospace; font-size: 12px; }
+.modal__body .update-notes blockquote { margin: 8px 0; padding-left: 9px; border-left: 2px solid var(--line); color: var(--muted); }
+.modal__body .update-notes a { color: var(--blue); }
 .modal__body label { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 8px; }
 .modal__body label input, .modal__body label select { width: 100%; height: 26px; }
 .modal__body label input[type="checkbox"] { justify-self: start; width: auto; height: auto; }

@@ -83,7 +83,7 @@
       "deleteAppDataOnUninstall": false,
       "include": "build/installer.nsh",
       "differentialPackage": false,
-      "artifactName": "SG Typer Studio-Setup.${ext}"
+      "artifactName": "SG.Typer.Studio-Setup.${ext}"
     },
     "publish": [
       {

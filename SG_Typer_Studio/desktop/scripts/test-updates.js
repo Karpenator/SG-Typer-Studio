@@ -117,6 +117,19 @@ test("one command moves update metadata and What's New to a clean repository", (
   assert.throws(() => repositoryFrom(["https://example.com/NewOwner/Clean-Studio"]));
 });
 
+test("GitHub HTML release notes are rendered through the remote-content sanitizer", () => {
+  const html = read("web/index.html");
+  assert.ok(html.indexOf('<script src="update-notes.js"></script>') < html.indexOf('<script src="app.js"></script>'));
+  const app = read("web/app.js");
+  assert.ok(app.includes("body.appendChild(UpdateNotes.render(notes))"));
+  const renderer = read("web/update-notes.js");
+  assert.ok(renderer.includes('const ALLOWED = new Set(["H1", "H2", "H3"'));
+  assert.ok(renderer.includes('template.content.querySelectorAll(DROP).forEach((element) => element.remove())'));
+  assert.ok(renderer.includes('Array.from(element.attributes).forEach((attribute) => element.removeAttribute(attribute.name))'));
+  assert.ok(renderer.includes('/^https?:\\/\\//i.test(href.trim())'));
+  assert.ok(renderer.includes('container.classList.add("update-notes--plain")'), "plain-text notes retain their line breaks");
+});
+
 test("Help, IPC, packaging and Russian strings implement only the fixed GitHub provider", () => {
   const app = read("web/app.js");
   assert.ok(app.includes('{ label: "Check for Updates…", action: checkForUpdates }'));
@@ -132,6 +145,10 @@ test("Help, IPC, packaging and Russian strings implement only the fixed GitHub p
   const pkg = JSON.parse(read("desktop/package.json"));
   assert.ok(pkg.dependencies["electron-updater"]);
   assert.equal(pkg.scripts["configure:github"], "node scripts/configure-github.js");
+  assert.equal(pkg.build.nsis.artifactName, "SG.Typer.Studio-Setup.${ext}");
+  const releaseWorkflow = fs.readFileSync(path.join(ROOT, "..", ".github", "workflows", "windows-release.yml"), "utf8");
+  assert.ok(releaseWorkflow.includes("SG_Typer_Studio/desktop/dist/SG.Typer.Studio-Setup.exe"));
+  assert.ok(!releaseWorkflow.includes("SG_Typer_Studio/desktop/dist/SG Typer Studio-Setup.exe"));
   assert.deepEqual(pkg.build.publish, [{ provider: "github", owner: "Karpenator", repo: "Syndicate_Typer_Studio", releaseType: "release" }]);
   const russian = read("web/strings/ru.js");
   assert.ok(russian.includes('"Check for Updates…": "Проверить обновление…"'));

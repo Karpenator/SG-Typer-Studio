@@ -15652,6 +15652,7 @@
 
   const DESKTOP = Boolean(window.TypeRDesktop);
   const DesktopUpdates = window.TypeRDesktop && window.TypeRDesktop.updates;
+  const UpdateNotes = window.TypeRUpdateNotes;
   const UPDATE_RELEASES = DesktopUpdates ? DesktopUpdates.releasesUrl : "https://github.com/Karpenator/SG-Typer-Studio/releases";
   let updateDownloadTask = null;
   if (DesktopUpdates) DesktopUpdates.onState((state) => {
@@ -15662,14 +15663,7 @@
     const text = document.createElement("p");
     text.textContent = message;
     body.appendChild(text);
-    if (notes) {
-      const changelog = document.createElement("p");
-      changelog.textContent = String(notes).slice(0, 12000);
-      changelog.style.whiteSpace = "pre-wrap";
-      changelog.style.maxHeight = "300px";
-      changelog.style.overflow = "auto";
-      body.appendChild(changelog);
-    }
+    if (notes) body.appendChild(UpdateNotes.render(notes));
     return body;
   };
   const updateError = (result) => dialog({

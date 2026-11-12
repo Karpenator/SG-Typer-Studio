@@ -76,8 +76,8 @@ jobs:
         with:
           name: SG-Typer-Studio-${{ inputs.version }}-windows-x64
           path: |
-            SG_Typer_Studio/desktop/dist/SG Typer Studio-Setup.exe
-            SG_Typer_Studio/desktop/dist/SG Typer Studio-Setup.exe.blockmap
+            SG_Typer_Studio/desktop/dist/SG.Typer.Studio-Setup.exe
+            SG_Typer_Studio/desktop/dist/SG.Typer.Studio-Setup.exe.blockmap
             SG_Typer_Studio/desktop/dist/latest.yml
           if-no-files-found: error
           retention-days: 30
@@ -106,10 +106,10 @@ jobs:
         run: |
           set -euo pipefail
           TAG="v${{ inputs.version }}"
-          FILES=("SG_Typer_Studio/desktop/dist/SG Typer Studio-Setup.exe" "SG_Typer_Studio/desktop/dist/latest.yml")
+          FILES=("SG_Typer_Studio/desktop/dist/SG.Typer.Studio-Setup.exe" "SG_Typer_Studio/desktop/dist/latest.yml")
           # Full NSIS updates work without differential blockmaps. Include one when a build emits it.
-          if [[ -f "SG_Typer_Studio/desktop/dist/SG Typer Studio-Setup.exe.blockmap" ]]; then
-            FILES+=("SG_Typer_Studio/desktop/dist/SG Typer Studio-Setup.exe.blockmap")
+          if [[ -f "SG_Typer_Studio/desktop/dist/SG.Typer.Studio-Setup.exe.blockmap" ]]; then
+            FILES+=("SG_Typer_Studio/desktop/dist/SG.Typer.Studio-Setup.exe.blockmap")
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${FILES[@]}" --clobber
