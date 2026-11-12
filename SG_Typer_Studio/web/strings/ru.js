@@ -1098,6 +1098,8 @@ window.TYPER_WEB_STRINGS = Object.assign(window.TYPER_WEB_STRINGS || {}, {
     "API protocol": "Протокол API",
     "Choose the protocol implemented by your server: OpenAI multipart image edits, or OpenRouter-compatible JSON with input_references. A full endpoint ending in /images/edits or /images is also accepted. The optional key is sent only to this endpoint.": "Выберите протокол сервера: OpenAI multipart для редактирования или совместимый с OpenRouter JSON с input_references. Можно указать полный endpoint, заканчивающийся на /images/edits или /images. Необязательный ключ отправляется только на этот endpoint.",
     "Uses the OpenRouter-compatible JSON /images endpoint below, with the selection in input_references. A local server may work without a key.": "Используется совместимый с OpenRouter JSON endpoint /images ниже; выделение передаётся в input_references. Локальный сервер может работать без ключа.",
+    "Download {size} once, then use it offline: ": "Скачать {size} один раз, затем использовать офлайн: ",
+    "Downloading {model}: {percent}%": "Загрузка {model}: {percent}%",
     "Check the custom API base URL in Generative Fill settings.": "Проверьте базовый URL пользовательского API в настройках генеративной заливки.",
     "Check for Updates…": "Проверить обновление…",
     "Checking for updates…": "Проверка обновлений…",

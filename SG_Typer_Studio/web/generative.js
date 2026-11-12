@@ -197,15 +197,7 @@
     return models.filter(([id], index) => models.findIndex(([other]) => other === id) === index);
   };
   const discoverOpenRouter = async (key, signal) => {
-    let response;
-    try {
-      response = await fetch("https://openrouter.ai/api/v1/images/models", { headers: key ? { Authorization: `Bearer ${key}` } : {}, signal });
-    } catch (error) {
-      if (error && error.name === "AbortError") throw error;
-      throw new GenerativeError("network", String((error && error.message) || error));
-    }
-    if (!response.ok) await readError(response);
-    const answer = await response.json();
+    const answer = await openRouterRequest("models", key, null, signal);
     const models = (answer.data || []).filter((one) => {
       const architecture = one && one.architecture;
       return one && slugOf("openrouter", one.id) === one.id && architecture && (architecture.output_modalities || []).includes("image") && (architecture.input_modalities || []).includes("image") && one.supported_parameters && one.supported_parameters.input_references;
@@ -472,6 +464,36 @@
     return response.json();
   };
 
+  let openRouterRequestId = 0;
+  const openRouterRequest = async (route, key, body, signal) => {
+    const desktop = window.TypeRDesktop && window.TypeRDesktop.openRouter;
+    if (desktop) {
+      const id = `openrouter-${++openRouterRequestId}`;
+      const stop = () => desktop.cancel(id);
+      if (signal) signal.addEventListener("abort", stop, { once: true });
+      try {
+        const answer = await desktop.request(id, { route, key, body });
+        if (answer && answer.ok) return answer.value;
+        if (answer && answer.kind === "cancelled") throw new DOMException("Aborted", "AbortError");
+        throw new GenerativeError((answer && answer.kind) || "network", (answer && answer.message) || "", answer && answer.status === 429, answer && answer.retry);
+      } finally {
+        if (signal) signal.removeEventListener("abort", stop);
+      }
+    }
+    if (route === "images") return post("https://openrouter.ai/api/v1/images", {
+      Authorization: `Bearer ${key}`, "X-Title": "SG Typer Studio",
+    }, body, signal);
+    let response;
+    try {
+      response = await fetch("https://openrouter.ai/api/v1/images/models", { headers: key ? { Authorization: `Bearer ${key}` } : {}, signal });
+    } catch (error) {
+      if (error && error.name === "AbortError") throw error;
+      throw new GenerativeError("network", String((error && error.message) || error));
+    }
+    if (!response.ok) await readError(response);
+    return response.json();
+  };
+
   // The last picture of an answer, whatever its shape: Gemini's parts (inlineData or inline_data),
   // the Interactions API's blocks ({ type: "image", data }), skipping the model's thought pictures
   const pictureIn = (answer) => {
@@ -635,10 +657,7 @@
     if (aspect) body.aspect_ratio = aspect;
     if (size && capabilities.resolutions && capabilities.resolutions.includes(size)) body.resolution = size;
     if (quality && capabilities.quality) body.quality = quality;
-    const answer = await post("https://openrouter.ai/api/v1/images", {
-      Authorization: `Bearer ${key}`,
-      "X-Title": "SG Typer Studio",
-    }, body, signal);
+    const answer = await openRouterRequest("images", key, body, signal);
     const found = imageUrlIn(answer);
     if (!found) throw refusalOf(answer);
     return { picture: await pictureFromUrl(found, signal), usage: answer.usage || null };
@@ -862,6 +881,11 @@
     return now && now.models[model] && !now.models[model].installed ? now.models[model].download : 0;
   };
   const localStatus = () => (desktopAI ? desktopAI.status() : Promise.resolve(null));
+  const localInstall = async (model, onProgress, signal) => {
+    if (!desktopAI || !isFlux(model)) throw new GenerativeError("local", "This model is installed by its first browser generation.");
+    if (!(await localDownload({ service: "local", models: { local: model }, custom: {} }))) return localStatus();
+    return askApp((id) => desktopAI.install(id, model), signal, onProgress);
+  };
   const localRemove = (model) => (desktopAI ? desktopAI.remove(model) : Promise.resolve(null));
   const viaFlux = async ({ model, canvas, mask, prompt, signal, onProgress }) => {
     if (!desktopAI) throw new GenerativeError("local", "FLUX runs only in the desktop app.");
@@ -971,5 +995,5 @@
     }
   };
 
-  window.TypeRGenerative = { SERVICES, DEFAULT_PROMPT, LOCAL_SIZE, LAMA_SIZE, load, save, modelOf, modelsOf, slugOf, ready, isLocal, isFlux, takesPrompt, fixedSize, drawsInPlace, longestFor, localReady, localDownload, localStatus, localRemove, ratiosFor, generate, discoverOpenRouter, endpointOf, GenerativeError, qualitiesOf, qualityOf, priceOf, costOf, refreshPrices, spent, resetSpent, adobeStatus, adobeConnect, adobeDisconnect, adobeCredits };
+  window.TypeRGenerative = { SERVICES, DEFAULT_PROMPT, LOCAL_SIZE, LAMA_SIZE, load, save, modelOf, modelsOf, slugOf, ready, isLocal, isFlux, takesPrompt, fixedSize, drawsInPlace, longestFor, localReady, localDownload, localStatus, localInstall, localRemove, ratiosFor, generate, discoverOpenRouter, endpointOf, GenerativeError, qualitiesOf, qualityOf, priceOf, costOf, refreshPrices, spent, resetSpent, adobeStatus, adobeConnect, adobeDisconnect, adobeCredits };
 })();

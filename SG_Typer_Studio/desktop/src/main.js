@@ -9,6 +9,7 @@ const discord = require("./discord");
 const { createFirefly } = require("./firefly");
 const { migrateLegacyProfile } = require("./profile-migration");
 const { createUpdateManager } = require("./update-manager");
+const { createOpenRouter } = require("./openrouter");
 
 const SCHEME = "typer";
 const HOST = "app";
@@ -468,6 +469,12 @@ ipcMain.handle("firefly-disconnect", (event) => fromEditor(event) ? firefly.disc
 ipcMain.handle("firefly-generate", (event, id, request) => fromEditor(event) ? firefly.generate(id, request) : null);
 ipcMain.on("firefly-cancel", (event, id) => { if (fromEditor(event)) firefly.cancel(id); });
 app.on("before-quit", () => firefly.close());
+
+// Fixed OpenRouter Image API routes, outside renderer CORS. The API key is used for this request
+// only and is not written by the main process.
+const openRouter = createOpenRouter();
+ipcMain.handle("openrouter-request", (event, id, request) => fromEditor(event) ? openRouter.request(id, request || {}) : { ok: false, kind: "other", message: "Not allowed." });
+ipcMain.on("openrouter-cancel", (event, id) => { if (fromEditor(event)) openRouter.cancel(id); });
 const localJobs = new Map();
 const localJob = async (event, id, run) => {
   if (!fromPage(event)) throw new Error("Not allowed.");

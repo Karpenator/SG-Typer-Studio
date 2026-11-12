@@ -8,7 +8,7 @@ const { contextBridge, ipcRenderer, webFrame } = require("electron");
 // Sandboxed preloads may require Electron and their own local modules, but not package.json.
 // Keep the fixed provider here: requiring the package used to abort the whole bridge, including
 // Actions, before contextBridge.exposeInMainWorld could run.
-const releasesUrl = "https://github.com/Karpenator/SG-Typer-Studio/releases";
+const releasesUrl = "https://github.com/Karpenator/Syndicate_Typer_Studio/releases";
 
 webFrame.setVisualZoomLevelLimits(1, 1);
 
@@ -75,6 +75,11 @@ contextBridge.exposeInMainWorld("TypeRDesktop", {
       ipcRenderer.on("firefly-state", receive);
       return () => ipcRenderer.removeListener("firefly-state", receive);
     },
+  },
+  // OpenRouter Image API without renderer CORS. Routes are restricted to discovery and images.
+  openRouter: {
+    request: (id, request) => ipcRenderer.invoke("openrouter-request", id, request),
+    cancel: (id) => ipcRenderer.send("openrouter-cancel", id),
   },
   // Generative Fill with FLUX on this computer: nothing is downloaded until a model is installed
   localAI: {

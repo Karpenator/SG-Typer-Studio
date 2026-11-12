@@ -198,6 +198,47 @@ test("the visible product name uses spaces without abandoning its old profile", 
   assert.ok(main.includes('path.join(app.getPath("appData"), "TypeR Studio")'));
 });
 
+test("desktop OpenRouter discovery and generation use the CORS-independent main-process bridge", async () => {
+  const source = read("web/generative.js");
+  const calls = [];
+  const installs = [];
+  const window = {
+    localStorage: { getItem: () => null, setItem: () => {} }, dispatchEvent: () => {},
+    TypeRDesktop: { localAI: {
+      onProgress: () => {},
+      status: async () => ({ available: true, models: { "flux2-klein-4b": { installed: false, download: 100 } } }),
+      install: async (id, model) => { installs.push({ id, model }); return { ok: true, value: { installed: true } }; },
+    }, openRouter: {
+      request: async (id, request) => {
+        calls.push({ id, request });
+        if (request.route === "models") return { ok: true, value: { data: [{ id: "vendor/desktop-image", name: "Desktop Image", architecture: { input_modalities: ["image", "text"], output_modalities: ["image"] }, supported_parameters: { input_references: { type: "range", min: 0, max: 2 }, aspect_ratio: { type: "enum", values: ["3:2"] } } }] } };
+        return { ok: true, value: { data: [{ b64_json: "AA==" }], usage: { cost: 0.01 } } };
+      },
+      cancel: () => {},
+    } },
+  };
+  const context = { window, localStorage: window.localStorage, console, URL, CustomEvent: function () {}, setTimeout, clearTimeout, FormData, Blob, atob, DOMException,
+    createImageBitmap: async () => ({ width: 1, height: 1 }),
+    fetch: async () => { throw new Error("renderer CORS failure"); },
+  };
+  vm.runInNewContext(source.replace("window.TypeRGenerative = { SERVICES,", "window.TypeRGenerative = { __viaOpenRouter: viaOpenRouter, SERVICES,"), context);
+  const Gen = window.TypeRGenerative;
+  const found = await Gen.discoverOpenRouter("secret");
+  assert.equal(found[0][0], "vendor/desktop-image");
+  await Gen.__viaOpenRouter({ key: "secret", model: "vendor/desktop-image", prompt: "edit", image: { mime: "image/png", data: "AAAA" }, ratio: "16:9", signal: null });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].request.route, "models");
+  assert.equal(calls[1].request.route, "images");
+  assert.equal(calls[1].request.body.aspect_ratio, "3:2");
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[1].request.body.input_references)), [{ type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } }]);
+  assert.ok(read("desktop/src/main.js").includes('ipcMain.handle("openrouter-request"'));
+  assert.ok(read("desktop/src/preload.js").includes('ipcRenderer.invoke("openrouter-request", id, request)'));
+  const installed = await Gen.localInstall("flux2-klein-4b", () => {}, null);
+  assert.equal(installed.installed, true);
+  assert.equal(installs.length, 1);
+  assert.equal(installs[0].model, "flux2-klein-4b");
+});
+
 test("OpenRouter uses its dedicated Image API with an input reference; custom local API keeps its credential contract", async () => {
   const source = read("web/generative.js");
   const window = {

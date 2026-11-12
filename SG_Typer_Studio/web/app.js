@@ -4213,7 +4213,29 @@
               if (price.isConnected) showModels();
             });
             line.appendChild(drop);
-          } else return;
+          } else {
+            line.textContent = `${fill(T("Download {size} once, then use it offline: "), { size: sizeText(here.download) })} `;
+            const install = document.createElement("button");
+            install.type = "button";
+            install.className = "btn btn--small";
+            install.textContent = T("Download");
+            install.addEventListener("click", async () => {
+              install.disabled = true;
+              try {
+                await Gen.localInstall(model, (step) => {
+                  if (step.phase === "download" && step.total) line.textContent = fill(T("Downloading {model}: {percent}%"), { model: named, percent: Math.floor(step.loaded / step.total * 100) });
+                }, listeners.signal);
+                if (price.isConnected) showModels();
+              } catch (error) {
+                if (error.name !== "AbortError" && price.isConnected) {
+                  line.textContent = generativeMessage(error, { service: "local", models: { local: model }, custom });
+                  line.append(" ", install);
+                  install.disabled = false;
+                }
+              }
+            });
+            line.appendChild(install);
+          }
           price.append(" ", line);
         });
       } else if (one && one.free) {
@@ -4574,7 +4596,7 @@
       case "quota": return fill(T("{service} says the quota or the balance is used up."), { service }) + detail;
       case "blocked": return T("The model refused this picture or this prompt.") + detail;
       case "noimage": return T("The model sent no picture back.") + detail;
-      case "network": return fill(T("{service} couldn't be reached."), { service });
+      case "network": return fill(T("{service} couldn't be reached."), { service }) + detail;
       default: return T("Generative Fill didn't go through.") + (detail || ` (${String((error && error.message) || error)})`);
     }
   };
