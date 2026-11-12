@@ -4120,6 +4120,7 @@
     const saved = Gen.load();
     const keys = Object.assign({}, saved.keys);
     const endpoints = Object.assign({}, saved.endpoints);
+    const apiModes = Object.assign({}, saved.apiModes);
     const models = Object.assign({}, saved.models);
     const custom = {};
     Object.keys(Gen.SERVICES).forEach((name) => { custom[name] = (saved.custom[name] || []).slice(); });
@@ -4180,9 +4181,11 @@
         qualitySelect.value = Gen.qualityOf({ quality }, service, model);
       }
       if (service === "custom") {
-        price.textContent = T("Uses the OpenAI-compatible images/edits endpoint below. A local server may work without a key; pricing and available models depend on the service.");
+        price.textContent = apiModes.custom === "json"
+          ? T("Uses the OpenRouter-compatible JSON /images endpoint below, with the selection in input_references. A local server may work without a key.")
+          : T("Uses the OpenAI-compatible multipart /images/edits endpoint below. A local server may work without a key; pricing and available models depend on the service.");
       } else if (service === "openrouter") {
-        price.textContent = T("Uses OpenRouter's image-capable chat completions API. The price depends on the model you choose; see its OpenRouter page.");
+        price.textContent = T("Uses OpenRouter's dedicated Image API. The price depends on the model you choose; see its OpenRouter page.");
       } else if (service === "adobe") {
         price.textContent = model !== "firefly-fill"
           ? fill(T("{model} edits the image from your prompt; TypeR keeps the result inside your selection. With no prompt, it removes lettering. Uses Adobe premium generative credits. Photoshop can stay closed."), { model: modelName({ service, custom }, model) })
@@ -4407,6 +4410,29 @@
       if (one.keyUrl) box.appendChild(link);
       keysCard.appendChild(field(one.name, box));
     });
+    // The Image API itself is the source of truth: newly released OpenRouter image models need
+    // no application update. Only models accepting image input are useful for Generative Fill.
+    const openRouterCard = card();
+    pane.append(heading(T("OpenRouter image models")), openRouterCard);
+    const discoverButton = document.createElement("button");
+    discoverButton.type = "button";
+    discoverButton.className = "btn btn--small";
+    discoverButton.textContent = T("Load all image-editing models");
+    const discoverStatus = hint(T("Loads OpenRouter's current Image API catalogue, including models not listed above. You can also paste any image-editing model slug under Other models."));
+    discoverButton.addEventListener("click", async () => {
+      discoverButton.disabled = true;
+      discoverStatus.textContent = T("Loading image models…");
+      try {
+        const found = await Gen.discoverOpenRouter(keyInputs.openrouter.value.trim(), listeners.signal);
+        discoverStatus.textContent = fill(T("{count} image-editing models available. Their supported aspect ratios and resolutions are applied automatically."), { count: found.length });
+        showModels();
+      } catch (error) {
+        if (error.name !== "AbortError") discoverStatus.textContent = generativeMessage(error, { service: "openrouter", keys, models, custom });
+      } finally {
+        if (discoverButton.isConnected) discoverButton.disabled = false;
+      }
+    });
+    openRouterCard.append(discoverButton, discoverStatus);
     // OpenAI-compatible services and local servers: the endpoint and model are explicit.
     const customCard = card();
     pane.append(heading(T("Custom or local API")), customCard);
@@ -4424,10 +4450,18 @@
       models.custom = customModelInput.value.trim();
       if (service === "custom") showModels();
     });
+    const customMode = document.createElement("select");
+    options(customMode, [
+      ["edit", T("OpenAI multipart · /images/edits")],
+      ["json", T("OpenRouter JSON · /images")],
+    ]);
+    customMode.value = apiModes.custom === "json" ? "json" : "edit";
+    customMode.addEventListener("change", () => { apiModes.custom = customMode.value; showPrice(); });
     customCard.append(
       field(T("API base URL"), endpointInput),
       field(T("Model"), customModelInput),
-      hint(T("The server must support OpenAI-compatible POST /images/edits. For a full endpoint, paste its address ending in /images/edits. The key, when present, is sent only to this endpoint.")),
+      field(T("API protocol"), customMode),
+      hint(T("Choose the protocol implemented by your server: OpenAI multipart image edits, or OpenRouter-compatible JSON with input_references. A full endpoint ending in /images/edits or /images is also accepted. The optional key is sent only to this endpoint.")),
     );
     // Other models, by their slug
     const otherCard = card();
@@ -4518,7 +4552,7 @@
         endpoints.custom = endpointInput.value.trim();
         models.custom = customModelInput.value.trim();
         models[service] = modelSelect.value;
-        if (!Gen.save({ service, keys, endpoints, models, custom, quality, matchTones: tonesSwitch.checked })) toast(T("The key couldn't be kept on this device: it works until the page is closed."), true);
+        if (!Gen.save({ service, keys, endpoints, apiModes, models, custom, quality, matchTones: tonesSwitch.checked })) toast(T("The key couldn't be kept on this device: it works until the page is closed."), true);
       },
     };
   };

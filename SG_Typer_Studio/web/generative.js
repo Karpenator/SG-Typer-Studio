@@ -88,6 +88,8 @@
       keyUrl: "https://openrouter.ai/settings/keys",
       models: [
         ["openai/gpt-image-1", "GPT Image 1"],
+        ["google/gemini-3.1-flash-image", "Nano Banana 2"],
+        ["bytedance-seed/seedream-5-5", "Seedream 5.5"],
         ["google/gemini-2.5-flash-image", "Gemini 2.5 Flash Image"],
         ["google/gemini-3-pro-image-preview", "Gemini 3 Pro Image"],
       ],
@@ -156,13 +158,14 @@
   })();
 
   const load = () => {
-    const out = { service: "google", keys: {}, models: {}, custom: {}, quality: {}, endpoints: { custom: "http://localhost:1234/v1" }, matchTones: true };
+    const out = { service: "google", keys: {}, models: {}, custom: {}, quality: {}, endpoints: { custom: "http://localhost:1234/v1" }, apiModes: { custom: "edit" }, matchTones: true };
     try {
       const saved = JSON.parse(window.localStorage.getItem(STORE)) || {};
       if (SERVICES[saved.service]) out.service = saved.service;
       // The inside brought to the page's brightness: on unless turned off
       if (saved.matchTones === false) out.matchTones = false;
       if (saved.endpoints && typeof saved.endpoints.custom === "string") out.endpoints.custom = saved.endpoints.custom;
+      if (saved.apiModes && saved.apiModes.custom === "json") out.apiModes.custom = "json";
       Object.keys(SERVICES).forEach((name) => {
         if (saved.keys && typeof saved.keys[name] === "string") out.keys[name] = saved.keys[name];
         if (saved.models && typeof saved.models[name] === "string" && saved.models[name]) out.models[name] = saved.models[name];
@@ -183,12 +186,47 @@
       return false;
     }
   };
-  // The service's models, then those added by their slug
+  // OpenRouter's catalogue is discovered from the Image API, not restricted to the shortcuts
+  // above. The map holds the request capabilities advertised by each model.
+  let openRouterModels = [];
   const modelsOf = (settings, service = settings.service) => {
-    const models = SERVICES[service].models.concat(((settings.custom && settings.custom[service]) || []).map((slug) => [slug, slug]));
+    const discovered = service === "openrouter" ? openRouterModels : [];
+    const models = SERVICES[service].models.concat(discovered, ((settings.custom && settings.custom[service]) || []).map((slug) => [slug, slug]));
     const current = settings.models && settings.models[service];
-    if (service === "custom" && current && !models.some(([id]) => id === current)) models.unshift([current, current]);
-    return models;
+    if ((service === "custom" || service === "openrouter") && current && !models.some(([id]) => id === current)) models.unshift([current, current]);
+    return models.filter(([id], index) => models.findIndex(([other]) => other === id) === index);
+  };
+  const discoverOpenRouter = async (key, signal) => {
+    let response;
+    try {
+      response = await fetch("https://openrouter.ai/api/v1/images/models", { headers: key ? { Authorization: `Bearer ${key}` } : {}, signal });
+    } catch (error) {
+      if (error && error.name === "AbortError") throw error;
+      throw new GenerativeError("network", String((error && error.message) || error));
+    }
+    if (!response.ok) await readError(response);
+    const answer = await response.json();
+    const models = (answer.data || []).filter((one) => {
+      const architecture = one && one.architecture;
+      return one && slugOf("openrouter", one.id) === one.id && architecture && (architecture.output_modalities || []).includes("image") && (architecture.input_modalities || []).includes("image") && one.supported_parameters && one.supported_parameters.input_references;
+    }).map((one) => {
+      const parameters = one.supported_parameters || {};
+      const ratio = parameters.aspect_ratio;
+      const resolution = parameters.resolution;
+      return {
+        id: one.id,
+        name: one.name || one.id,
+        ratios: ratio && ratio.type === "enum" ? ratio.values.filter((value) => /^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(value)) : null,
+        resolutions: resolution && resolution.type === "enum" ? resolution.values : null,
+        quality: Boolean(parameters.quality),
+        references: Boolean(parameters.input_references),
+      };
+    });
+    // Do not let a stale or incomplete catalogue replace a working one.
+    if (!models.length) throw new GenerativeError("noimage", "OpenRouter returned no image-editing models.");
+    openRouterModels = models.map((one) => [one.id, one.name]);
+    models.forEach((one) => OPENROUTER_PARAMETERS[one.id] = { ratios: one.ratios, resolutions: one.resolutions, quality: one.quality });
+    return models.map((one) => [one.id, one.name]);
   };
   const modelOf = (settings, service = settings.service) => {
     const wanted = settings.models?.[service];
@@ -243,6 +281,8 @@
   const costOf = (settings, service, model, { size, usage, megapixels } = {}) => {
     if (isLocal(service)) return null;
     const price = PRICES[`${service}:${model}`];
+    const openRouterCharge = service === "openrouter" && usage && usage.cost != null ? Number(usage.cost) : NaN;
+    if (Number.isFinite(openRouterCharge) && openRouterCharge >= 0) return { usd: openRouterCharge, counted: true };
     if (service === "google" && price && usage && price.tokens) {
       const [input, text, image] = price.tokens;
       const pictures = (usage.candidatesTokensDetails || []).filter((one) => one.modality === "IMAGE").reduce((sum, one) => sum + (one.tokenCount || 0), 0);
@@ -326,14 +366,34 @@
   // The shapes the models draw: the area sent grows to the nearest one, so nothing is squeezed
   const RATIOS = ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9", "21:9"];
   const LONG_RATIOS = ["1:4", "4:1", "1:8", "8:1"];
+  // Optional Image API parameters are model-specific. Unknown/custom models get the safe
+  // minimal request instead of a parameter their provider may reject.
+  const OPENROUTER_PARAMETERS = {
+    "openai/gpt-image-1": { ratios: ["1:1", "3:2", "2:3"], quality: true },
+    "google/gemini-3.1-flash-image": { ratios: RATIOS.concat(LONG_RATIOS), resolutions: ["512", "1K", "2K", "4K"] },
+    "bytedance-seed/seedream-5-5": { ratios: ["1:1", "1:2", "2:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "9:19.5", "19.5:9", "9:20", "20:9", "9:21", "21:9"], resolutions: ["1K", "1.5K", "2K"] },
+  };
+  const nearestRatio = (wanted, supported) => {
+    if (!supported || !supported.length) return null;
+    if (supported.includes(wanted)) return wanted;
+    const numeric = (label) => {
+      const [w, h] = String(label || "").split(":").map(Number);
+      return w > 0 && h > 0 ? w / h : 1;
+    };
+    const target = numeric(wanted);
+    return supported.reduce((best, label) => Math.abs(numeric(label) - target) < Math.abs(numeric(best) - target) ? label : best, supported[0]);
+  };
   const knowsLongRatios = (model) => /3\.1-flash|nano-banana-2/.test(model);
   // Models that draw at 1K, 2K or 4K; the others at about one megapixel
   const knowsSizes = (model) => /gemini-3|nano-banana-2|nano-banana-pro/.test(model) && !/lite/.test(model);
-  const ratiosFor = (model) => (model === "lama-manga" ? ["1:1"] : isFlux(model) ? RATIOS.concat(LONG_RATIOS) : /kontext/.test(model) ? RATIOS.filter((r) => r !== "4:5" && r !== "5:4") : knowsLongRatios(model) ? RATIOS.concat(LONG_RATIOS) : RATIOS)
-    .map((label) => {
+  const ratiosFor = (model) => {
+    const supported = OPENROUTER_PARAMETERS[model] && OPENROUTER_PARAMETERS[model].ratios;
+    const values = supported || (model === "lama-manga" ? ["1:1"] : isFlux(model) ? RATIOS.concat(LONG_RATIOS) : /kontext/.test(model) ? RATIOS.filter((r) => r !== "4:5" && r !== "5:4") : knowsLongRatios(model) ? RATIOS.concat(LONG_RATIOS) : RATIOS);
+    return values.map((label) => {
       const [w, h] = label.split(":").map(Number);
       return { label, value: w / h };
     });
+  };
 
   // `rate`: only too many requests at once, which passes on its own (`retry`: the seconds the
   // service asked to wait, 0 when it didn't say), not a quota or a balance used up
@@ -533,7 +593,7 @@
     const walk = (node) => {
       if (found || !node || typeof node !== "object") return;
       if (Array.isArray(node)) { node.forEach(walk); return; }
-      if (typeof node.b64_json === "string") { found = { data: node.b64_json, mime: "image/png" }; return; }
+      if (typeof node.b64_json === "string") { found = { data: node.b64_json, mime: node.media_type || node.mime_type || "image/png" }; return; }
       const container = node.image_url || node.imageUrl;
       const url = typeof container === "string" ? container : container && container.url;
       if (typeof url === "string") { found = { url }; return; }
@@ -561,18 +621,24 @@
     if (type && !type.startsWith("image/")) throw new GenerativeError("noimage", "The image address did not return an image.");
     return toBitmap(await response.blob());
   };
-  const viaOpenRouter = async ({ key, model, prompt, image, signal }) => {
-    const answer = await post("https://openrouter.ai/api/v1/chat/completions", {
+  const viaOpenRouter = async ({ key, model, prompt, image, ratio, size, quality, signal }) => {
+    // OpenRouter's image-only models do not serve chat/completions and cannot return the
+    // image+text modality pair. The dedicated Image API handles those and hybrid image models.
+    const capabilities = OPENROUTER_PARAMETERS[model] || {};
+    const body = {
+      model,
+      prompt,
+      n: 1,
+      input_references: [{ type: "image_url", image_url: { url: `data:${image.mime};base64,${image.data}` } }],
+    };
+    const aspect = nearestRatio(ratio, capabilities.ratios);
+    if (aspect) body.aspect_ratio = aspect;
+    if (size && capabilities.resolutions && capabilities.resolutions.includes(size)) body.resolution = size;
+    if (quality && capabilities.quality) body.quality = quality;
+    const answer = await post("https://openrouter.ai/api/v1/images", {
       Authorization: `Bearer ${key}`,
       "X-Title": "SG Typer Studio",
-    }, {
-      model,
-      modalities: ["image", "text"],
-      messages: [{ role: "user", content: [
-        { type: "text", text: prompt },
-        { type: "image_url", image_url: { url: `data:${image.mime};base64,${image.data}` } },
-      ] }],
-    }, signal);
+    }, body, signal);
     const found = imageUrlIn(answer);
     if (!found) throw refusalOf(answer);
     return { picture: await pictureFromUrl(found, signal), usage: answer.usage || null };
@@ -587,16 +653,28 @@
   };
   const viaCompatible = async ({ key, model, prompt, image, settings, signal }) => {
     const base = endpointOf(settings);
-    const url = /\/images\/edits$/i.test(base) ? base : `${base}/images/edits`;
-    const body = new FormData();
-    body.append("model", model);
-    body.append("prompt", prompt);
-    body.append("image", new Blob([bytesOf(image.data)], { type: image.mime }), `selection.${image.mime === "image/png" ? "png" : "jpg"}`);
     const headers = key ? { Authorization: `Bearer ${key}` } : {};
-    const answer = await postForm(url, headers, body, signal);
+    let answer;
+    if (settings.apiModes && settings.apiModes.custom === "json") {
+      const url = /\/images$/i.test(base) ? base : `${base}/images`;
+      const body = {
+        model, prompt, n: 1,
+        input_references: [{ type: "image_url", image_url: { url: `data:${image.mime};base64,${image.data}` } }],
+      };
+      // Local servers have no common capability-discovery contract. Keep the request minimal;
+      // optional ratio/resolution fields are not portable outside OpenRouter's catalogue.
+      answer = await post(url, headers, body, signal);
+    } else {
+      const url = /\/images\/edits$/i.test(base) ? base : `${base}/images/edits`;
+      const body = new FormData();
+      body.append("model", model);
+      body.append("prompt", prompt);
+      body.append("image", new Blob([bytesOf(image.data)], { type: image.mime }), `selection.${image.mime === "image/png" ? "png" : "jpg"}`);
+      answer = await postForm(url, headers, body, signal);
+    }
     const found = imageUrlIn(answer);
     if (!found) throw refusalOf(answer);
-    return { picture: await pictureFromUrl(found, signal, base) };
+    return { picture: await pictureFromUrl(found, signal, base), usage: answer.usage || null };
   };
 
   // Models that take the selection as a mask, black where they draw
@@ -893,5 +971,5 @@
     }
   };
 
-  window.TypeRGenerative = { SERVICES, DEFAULT_PROMPT, LOCAL_SIZE, LAMA_SIZE, load, save, modelOf, modelsOf, slugOf, ready, isLocal, isFlux, takesPrompt, fixedSize, drawsInPlace, longestFor, localReady, localDownload, localStatus, localRemove, ratiosFor, generate, endpointOf, GenerativeError, qualitiesOf, qualityOf, priceOf, costOf, refreshPrices, spent, resetSpent, adobeStatus, adobeConnect, adobeDisconnect, adobeCredits };
+  window.TypeRGenerative = { SERVICES, DEFAULT_PROMPT, LOCAL_SIZE, LAMA_SIZE, load, save, modelOf, modelsOf, slugOf, ready, isLocal, isFlux, takesPrompt, fixedSize, drawsInPlace, longestFor, localReady, localDownload, localStatus, localRemove, ratiosFor, generate, discoverOpenRouter, endpointOf, GenerativeError, qualitiesOf, qualityOf, priceOf, costOf, refreshPrices, spent, resetSpent, adobeStatus, adobeConnect, adobeDisconnect, adobeCredits };
 })();

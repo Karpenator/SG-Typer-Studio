@@ -198,24 +198,93 @@ test("the visible product name uses spaces without abandoning its old profile", 
   assert.ok(main.includes('path.join(app.getPath("appData"), "TypeR Studio")'));
 });
 
-test("OpenRouter and custom local image APIs have the intended request and credential contracts", () => {
+test("OpenRouter uses its dedicated Image API with an input reference; custom local API keeps its credential contract", async () => {
   const source = read("web/generative.js");
   const window = {
     localStorage: { getItem: () => null, setItem: () => {} },
     dispatchEvent: () => {},
   };
-  const context = { window, localStorage: window.localStorage, console, URL, CustomEvent: function () {}, setTimeout, clearTimeout, FormData, Blob, fetch };
-  vm.runInNewContext(source, context);
+  const requests = [];
+  const context = {
+    window, localStorage: window.localStorage, console, URL, CustomEvent: function () {}, setTimeout, clearTimeout, FormData, Blob, atob,
+    createImageBitmap: async () => ({ width: 1, height: 1 }),
+    fetch: async (url, options) => {
+      requests.push({ url, options });
+      if (String(url).endsWith("/images/models")) return { ok: true, json: async () => ({ data: [
+        { id: "vendor/new-image", name: "New Image", architecture: { input_modalities: ["text", "image"], output_modalities: ["image"] }, supported_parameters: { aspect_ratio: { type: "enum", values: ["auto", "1:1", "1:8"] }, resolution: { type: "enum", values: ["1K", "3K"] }, input_references: { type: "range", min: 0, max: 4 } } },
+        { id: "vendor/text-only", architecture: { input_modalities: ["text"], output_modalities: ["text"] } },
+        { id: "vendor/text-to-image", architecture: { input_modalities: ["text"], output_modalities: ["image"] } },
+      ] }) };
+      return { ok: true, json: async () => ({ data: [{ b64_json: "AA==", media_type: "image/png" }], usage: { cost: 0.01 } }) };
+    },
+  };
+  const testSource = source.replace("window.TypeRGenerative = { SERVICES,", "window.TypeRGenerative = { __viaOpenRouter: viaOpenRouter, __viaCompatible: viaCompatible, SERVICES,");
+  vm.runInNewContext(testSource, context);
   const Gen = window.TypeRGenerative;
   assert.ok(Gen.SERVICES.openrouter && Gen.SERVICES.custom.keyOptional);
   assert.equal(Gen.slugOf("openrouter", "openai/gpt-image-1"), "openai/gpt-image-1");
+  assert.ok(Gen.modelsOf({ custom: {} }, "openrouter").some(([id]) => id === "google/gemini-3.1-flash-image"));
+  assert.ok(Gen.modelsOf({ custom: {} }, "openrouter").some(([id]) => id === "bytedance-seed/seedream-5-5"));
+  assert.ok(Gen.ratiosFor("bytedance-seed/seedream-5-5").some(({ label }) => label === "1:2"));
   assert.equal(Gen.slugOf("custom", "my-local-model"), "my-local-model");
   const custom = { service: "custom", keys: { custom: "" }, endpoints: { custom: "http://localhost:1234/v1" }, models: { custom: "editor" }, custom: {} };
   assert.equal(Gen.ready(custom), true);
   assert.equal(Gen.endpointOf(custom), "http://localhost:1234/v1");
   assert.throws(() => Gen.endpointOf({ endpoints: { custom: "ftp://localhost" } }), (error) => error.kind === "endpoint");
-  assert.ok(source.includes('"https://openrouter.ai/api/v1/chat/completions"'));
-  assert.ok(source.includes('modalities: ["image", "text"]'));
+
+  const result = await Gen.__viaOpenRouter({ key: "secret", model: "openai/gpt-image-1", prompt: "remove the text", image: { mime: "image/png", data: "AAAA" }, ratio: "16:9", size: "2K", quality: "high", signal: null });
+  assert.equal(result.picture.width, 1);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "https://openrouter.ai/api/v1/images");
+  assert.equal(requests[0].options.headers.Authorization, "Bearer secret");
+  const body = JSON.parse(requests[0].options.body);
+  assert.equal(body.model, "openai/gpt-image-1");
+  assert.equal(body.prompt, "remove the text");
+  assert.equal(body.n, 1);
+  assert.equal(body.modalities, undefined, "image-only models must not be asked for text output");
+  assert.equal(body.messages, undefined, "the dedicated Image API does not use chat messages");
+  assert.deepEqual(body.input_references, [{ type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } }]);
+  assert.equal(body.aspect_ratio, "3:2", "GPT Image gets the nearest supported aspect ratio");
+  assert.equal(body.quality, "high");
+  assert.equal(body.resolution, undefined, "GPT Image does not accept the resolution field");
+
+  await Gen.__viaOpenRouter({ key: "secret", model: "google/gemini-3.1-flash-image", prompt: "edit", image: { mime: "image/png", data: "AAAA" }, ratio: "1:4", size: "4K", signal: null });
+  const gemini = JSON.parse(requests[1].options.body);
+  assert.equal(gemini.aspect_ratio, "1:4");
+  assert.equal(gemini.resolution, "4K");
+  assert.equal(gemini.quality, undefined);
+  await Gen.__viaOpenRouter({ key: "secret", model: "bytedance-seed/seedream-5-5", prompt: "edit", image: { mime: "image/png", data: "AAAA" }, ratio: "1:2", size: "1.5K", signal: null });
+  const seedream = JSON.parse(requests[2].options.body);
+  assert.equal(seedream.aspect_ratio, "1:2");
+  assert.equal(seedream.resolution, "1.5K");
+  assert.equal(requests.length, 3);
+  const discovered = await Gen.discoverOpenRouter("secret");
+  assert.deepEqual(JSON.parse(JSON.stringify(discovered)), [["vendor/new-image", "New Image"]], "only image-output models that accept an image can edit a selection");
+  assert.equal(requests[3].options.headers.Authorization, "Bearer secret");
+  assert.ok(Gen.ratiosFor("vendor/new-image").every(({ label, value }) => label !== "auto" && Number.isFinite(value)));
+  await Gen.__viaOpenRouter({ key: "secret", model: "vendor/new-image", prompt: "edit", image: { mime: "image/png", data: "AAAA" }, ratio: "1:8", size: "3K", signal: null });
+  const dynamic = JSON.parse(requests[4].options.body);
+  assert.equal(dynamic.aspect_ratio, "1:8");
+  assert.equal(dynamic.resolution, "3K");
+  assert.ok(Gen.modelsOf({ models: { openrouter: "vendor/manual-image" }, custom: {} }, "openrouter").some(([id]) => id === "vendor/manual-image"));
+
+  const localImage = { mime: "image/png", data: "AAAA" };
+  const localSettings = { endpoints: { custom: "http://localhost:1234/v1/images" }, apiModes: { custom: "json" } };
+  await Gen.__viaCompatible({ key: "", model: "local-model", prompt: "edit", image: localImage, settings: localSettings, signal: null });
+  assert.equal(requests[5].url, "http://localhost:1234/v1/images");
+  assert.equal(requests[5].options.headers.Authorization, undefined);
+  const local = JSON.parse(requests[5].options.body);
+  assert.equal(local.model, "local-model");
+  assert.deepEqual(local.input_references, [{ type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } }]);
+  assert.equal(local.aspect_ratio, undefined, "local requests stay minimal without capability discovery");
+  await Gen.__viaCompatible({ key: "local-key", model: "local-model", prompt: "edit", image: localImage, settings: { endpoints: { custom: "http://localhost:1234/v1" }, apiModes: { custom: "edit" } }, signal: null });
+  assert.equal(requests[6].url, "http://localhost:1234/v1/images/edits");
+  assert.equal(requests[6].options.headers.Authorization, "Bearer local-key");
+  assert.equal(requests[6].options.body.get("model"), "local-model");
+  assert.equal(requests[6].options.body.get("prompt"), "edit");
+  assert.equal(requests[6].options.body.get("image").type, "image/png");
+  assert.deepEqual({ ...Gen.costOf({}, "openrouter", "bytedance-seed/seedream-5-5", { usage: { cost: 0.04 } }) }, { usd: 0.04, counted: true });
+
   assert.ok(source.includes('`${base}/images/edits`'));
   assert.ok(source.includes("const headers = key ? { Authorization: `Bearer ${key}` } : {};"));
   assert.ok(source.includes("/^data:(image\\/[\\w.+-]+);base64,(.+)$/s"));
