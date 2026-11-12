@@ -2907,6 +2907,7 @@
       input.addEventListener("input", () => {
         app[key] = fromHex(input.value);
         if (key === "fg" && activeTexts().length) applyTextPatch({ color: toRgb(app.fg) }, null, "color");
+        showColors();
       });
       return input;
     };
@@ -2959,6 +2960,7 @@
     const gray = maskPainting() ? (c) => { const v = PS.grayOf(toRgb(c)); return { r: v, g: v, b: v }; } : (c) => c;
     ui.fg.value = toHex(gray(app.fg));
     ui.bg.value = toHex(gray(app.bg));
+    if (window.TypeRColor) window.TypeRColor.refresh();
     if (ui.quickMask) {
       const on = Boolean(app.doc && app.doc.state.quickMask);
       ui.quickMask.classList.toggle("is-on", on);
@@ -3468,7 +3470,7 @@
     if (PS.TEXT_LANGUAGES.some(([name]) => name === saved.language)) app.textDefaults.language = saved.language;
     if (saved.ligature === false) app.textDefaults.ligature = false;
     if (saved.hyphenate === true) app.textDefaults.hyphenate = true;
-    if (saved.autoKern === "manual") app.textDefaults.autoKern = "manual";
+    if (["manual", "metricsKern", "opticalKern"].includes(saved.autoKern)) app.textDefaults.autoKern = saved.autoKern;
     if (saved.textOnTop === true) app.textDefaults.textOnTop = true;
     if (saved.smartGuides === false) settings.smartGuides = false;
     if (saved.snapText === true) settings.snapText = true;
@@ -3492,7 +3494,7 @@
     const d = app.textDefaults;
     try {
       // A language nobody chose keeps following the interface
-      window.localStorage.setItem(STORE_SETTINGS, JSON.stringify({ spellcheck: settings.spellcheck ? undefined : false, wheel: settings.wheel, zoomSpeed: settings.zoomSpeed === "normal" ? undefined : settings.zoomSpeed, smartGuides: settings.smartGuides, snapText: settings.snapText || undefined, transformControls: settings.transformControls ? undefined : false, taskBar: settings.taskBar ? undefined : false, taskBarPlace: settings.taskBarPlace || undefined, hiddenChars: settings.hiddenChars || undefined, discord: settings.discord === "page" ? undefined : settings.discord, sizeStep: settings.sizeStep === 2 ? undefined : settings.sizeStep, ligature: d.ligature, hyphenate: d.hyphenate || undefined, autoKern: d.autoKern === "manual" ? "manual" : undefined, textOnTop: d.textOnTop || undefined, language: d.language === PS.DEFAULT_TEXT_LANGUAGE ? undefined : d.language }));
+      window.localStorage.setItem(STORE_SETTINGS, JSON.stringify({ spellcheck: settings.spellcheck ? undefined : false, wheel: settings.wheel, zoomSpeed: settings.zoomSpeed === "normal" ? undefined : settings.zoomSpeed, smartGuides: settings.smartGuides, snapText: settings.snapText || undefined, transformControls: settings.transformControls ? undefined : false, taskBar: settings.taskBar ? undefined : false, taskBarPlace: settings.taskBarPlace || undefined, hiddenChars: settings.hiddenChars || undefined, discord: settings.discord === "page" ? undefined : settings.discord, sizeStep: settings.sizeStep === 2 ? undefined : settings.sizeStep, ligature: d.ligature, hyphenate: d.hyphenate || undefined, autoKern: d.autoKern === "manual" || d.autoKern === "opticalKern" ? d.autoKern : undefined, textOnTop: d.textOnTop || undefined, language: d.language === PS.DEFAULT_TEXT_LANGUAGE ? undefined : d.language }));
     } catch (error) {
       console.warn("SG Typer Studio: could not keep the settings", error);
     }
@@ -10224,13 +10226,13 @@
     baseline.title = T("Baseline shift");
     host.append(scrubbed(T("Baseline"), baseline, withSteps(baseline)));
     const kerning = document.createElement("select");
-    [["metricsKern", T("Metrics")], ["manual", "0"]].forEach(([value, name]) => {
+    [["metricsKern", T("Metrics")], ["opticalKern", T("Optical")], ["manual", "0"]].forEach(([value, name]) => {
       const option = document.createElement("option");
       option.value = value;
       option.textContent = name;
       kerning.appendChild(option);
     });
-    kerning.value = style.autoKern === "manual" ? "manual" : "metricsKern";
+    kerning.value = ["manual", "opticalKern"].includes(style.autoKern) ? style.autoKern : "metricsKern";
     kerning.title = T("Alt + left or right arrow: kerning at the cursor, or tracking of the selection.");
     // The last one chosen is the one new text takes, as the font and the size
     kerning.addEventListener("change", () => {
@@ -15887,6 +15889,7 @@
       { label: "TypeR", check: () => Workspace().isVisible("typer"), action: () => Workspace().toggle("typer") },
       { label: "Side Panels", check: () => Workspace().sideVisible(), action: () => Workspace().toggleSide() },
       null,
+      { label: "Color panel", check: () => Workspace().isVisible("color"), action: () => Workspace().toggle("color") },
       { label: "Navigator", check: () => Workspace().isVisible("navigator"), action: () => Workspace().toggle("navigator") },
       { label: "Styles", check: () => Workspace().isVisible("styles"), action: () => Workspace().toggle("styles") },
       { label: "Brushes", check: () => Workspace().isVisible("brushes"), action: () => Workspace().toggle("brushes") },
@@ -17668,6 +17671,17 @@
   }
   buildMenus();
   buildTools();
+  window.TypeRColor.init({
+    translate: T,
+    getForeground: () => app.fg,
+    getBackground: () => app.bg,
+    setColor(key, color) {
+      app[key] = color;
+      if (key === "fg" && activeTexts().length) applyTextPatch({ color: toRgb(color) }, null, "color");
+      showColors();
+    },
+    openPicker(key) { openColorPicker(key === "fg" ? ui.fg : ui.bg); },
+  });
   window.TypeRStyles.init({ translate: T, dialog, toast, targets: styleTargets });
   window.TypeRBrushes.init({ translate: T, toast });
   window.TypeRActions.init({ translate: T, dialog, toast });

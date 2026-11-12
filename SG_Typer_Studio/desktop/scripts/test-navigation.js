@@ -13,8 +13,8 @@ test("Navigator is a localizable Workspace panel with a live viewport and zoom c
   }
   const workspace = read("web/workspace.js");
   assert.ok(workspace.includes('navigator: "pane-navigator"'));
-  assert.ok(workspace.includes('const SIDE = ["navigator", "styles", "brushes", "actions", "layers"'));
-  assert.ok(workspace.includes('panels: ["navigator", "styles", "brushes", "actions", "layers"'));
+  assert.ok(workspace.includes('const SIDE = ["navigator", "color", "styles", "brushes", "actions", "layers"'));
+  assert.ok(workspace.includes('panels: ["typer", "navigator", "color", "layers", "character"]'));
   const app = read("web/app.js");
   assert.ok(app.includes('{ label: "Navigator", check: () => Workspace().isVisible("navigator")'));
   assert.ok(app.includes("ctx.drawImage(docCanvas, 0, 0, shownW, shownH);"), "the thumbnail follows the composed document");

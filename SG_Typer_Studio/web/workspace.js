@@ -11,29 +11,38 @@
   const STORE = "typer.web.layout";
   const SPLIT = 4;
   const TOOLS = 42;
+  const RAIL = 42;
+  const RAIL_STEP = 35;
   const HEAD = 26;
   const MIN_DOCS = 320;
-  const ELEMENTS = { tools: "tools", typer: "dock-typer", navigator: "pane-navigator", styles: "pane-styles", brushes: "pane-brushes", actions: "pane-actions", layers: "pane-layers", character: "pane-character", sfx: "pane-sfx", breaks: "breaks", history: "pane-history" };
-  const PANELS = ["typer", "navigator", "styles", "brushes", "actions", "layers", "character", "sfx", "breaks", "history"];
-  const SIDE = ["navigator", "styles", "brushes", "actions", "layers", "character", "sfx", "breaks", "history"];
-  const COLUMNS = ["left", "middle", "right"];
-  const MIN = { tools: [42, 42], typer: [280, 260], navigator: [180, 150], styles: [180, 150], brushes: [210, 180], actions: [190, 130], layers: [170, 90], character: [210, 130], sfx: [230, 160], breaks: [210, 120], history: [150, 80] };
+  const ELEMENTS = { tools: "tools", typer: "dock-typer", navigator: "pane-navigator", color: "pane-color", styles: "pane-styles", brushes: "pane-brushes", actions: "pane-actions", layers: "pane-layers", character: "pane-character", sfx: "pane-sfx", breaks: "breaks", history: "pane-history" };
+  const PANELS = ["typer", "navigator", "color", "styles", "brushes", "actions", "layers", "character", "sfx", "breaks", "history"];
+  const SIDE = ["navigator", "color", "styles", "brushes", "actions", "layers", "character", "sfx", "breaks", "history"];
+  const COLUMNS = ["left", "right"];
+  const MIN = { tools: [42, 42], typer: [280, 260], navigator: [180, 150], color: [190, 190], styles: [180, 150], brushes: [210, 180], actions: [190, 130], layers: [170, 90], character: [210, 130], sfx: [230, 160], breaks: [210, 120], history: [150, 80] };
   const Shell = window.TypeRShell;
   const work = $("work");
   const docs = work.querySelector(".docs");
+  const rail = document.createElement("nav");
+  rail.className = "ws-rail";
+  rail.id = "workspace-rail";
+  rail.setAttribute("aria-label", "Collapsed panels");
   const element = (id) => $(ELEMENTS[id]);
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 
   /* ------------------------------- the arrangement ------------------------------ */
 
   const fresh = () => ({
-    version: 1,
+    version: 2,
     tools: "left",
-    columns: { left: { width: 250, panels: [] }, middle: { width: 360, panels: ["typer"] }, right: { width: 250, panels: ["navigator", "styles", "brushes", "actions", "layers", "character", "sfx", "breaks", "history"] } },
-    heights: { typer: 600, navigator: 220, styles: 290, brushes: 340, actions: 240, layers: 290, character: 240, sfx: 420, breaks: 290, history: 180 },
-    // The SFX panel comes with the SFX tool; Actions opens from Window when it is needed.
-    hidden: { history: true, sfx: true, brushes: true, actions: true },
+    columns: { left: { width: 250, panels: [] }, right: { width: 310, panels: ["typer", "navigator", "color", "layers", "character"] } },
+    heights: { typer: 520, navigator: 220, color: 260, styles: 290, brushes: 340, actions: 240, layers: 290, character: 240, sfx: 420, breaks: 290, history: 180 },
+    hidden: {},
     floating: {},
+    // The second former right-hand column is now a narrow icon rail. A railed panel opens left.
+    rail: ["styles", "brushes", "actions", "sfx", "breaks", "history"],
+    railOpen: null,
+    railRects: {},
     // A docked tab group's leader is its entry in a column. The other panels share its rectangle.
     tabs: {},
     order: [],
@@ -44,13 +53,27 @@
   const load = () => {
     try {
       const saved = JSON.parse(window.localStorage.getItem(STORE));
-      if (!saved || saved.version !== 1) return fresh();
+      if (!saved || (saved.version !== 1 && saved.version !== 2)) return fresh();
       const layout = Object.assign(fresh(), saved);
+      layout.version = 2;
+      layout.hidden = Object.assign({}, saved.hidden);
+      layout.floating = Object.assign({}, saved.floating);
+      layout.railRects = Object.assign({}, saved.railRects);
+      layout.heights = Object.assign({}, fresh().heights, saved.heights);
+      // Version 1 had two full right-hand columns. Keep every panel, but merge those columns
+      // into the one full dock beside the new rail instead of discarding a user's arrangement.
+      const left = saved.columns && saved.columns.left || { width: 250, panels: [] };
+      const oldRight = saved.columns && saved.columns.right || { width: 310, panels: [] };
+      const oldMiddle = saved.columns && saved.columns.middle || { panels: [] };
+      const rightPanels = saved.version === 1 ? [...(oldMiddle.panels || []), ...(oldRight.panels || [])] : (oldRight.panels || []);
+      layout.columns = {
+        left: { width: left.width || 250, panels: [...(left.panels || [])] },
+        right: { width: oldRight.width || (saved.columns && saved.columns.middle && saved.columns.middle.width) || 310, panels: rightPanels },
+      };
+      layout.rail = saved.version === 2 && Array.isArray(saved.rail) ? saved.rail.filter((id, at, all) => PANELS.includes(id) && all.indexOf(id) === at) : [];
       layout.tabs = {};
-      // Validate tab groups before placing their leaders. A damaged layout must never duplicate
-      // a panel or make the only visible copy of one disappear.
       const memberOf = {};
-      const claimed = new Set(Object.keys(layout.floating));
+      const claimed = new Set([...Object.keys(layout.floating), ...layout.rail]);
       Object.entries(saved.tabs || {}).forEach(([leader, group]) => {
         if (!PANELS.includes(leader) || claimed.has(leader) || !group || !Array.isArray(group.panels)) return;
         const panels = group.panels.filter((id) => {
@@ -62,8 +85,8 @@
         layout.tabs[leader] = { panels, active: panels.includes(group.active) ? group.active : leader };
         panels.forEach((id) => { memberOf[id] = leader; });
       });
-      // Every panel in exactly one place, whatever a file from another version says.
-      const seen = new Set(Object.keys(layout.floating));
+      // Every panel occurs exactly once: floating, a tab group, a column, or the rail.
+      const seen = new Set([...Object.keys(layout.floating), ...layout.rail]);
       COLUMNS.forEach((name) => {
         layout.columns[name].panels = layout.columns[name].panels.filter((id) => {
           if (!PANELS.includes(id) || seen.has(id) || (memberOf[id] && memberOf[id] !== id)) return false;
@@ -72,19 +95,14 @@
           return true;
         });
       });
-      // A group whose leader was lost becomes ordinary panels again.
       Object.keys(layout.tabs).forEach((leader) => { if (!seen.has(leader)) delete layout.tabs[leader]; });
       PANELS.forEach((id) => {
         if (seen.has(id)) return;
-        if (id === "navigator" || id === "styles" || id === "brushes" || id === "actions") {
-          const at = layout.columns.right.panels.indexOf("layers");
-          layout.columns.right.panels.splice(at < 0 ? layout.columns.right.panels.length : at, 0, id);
-        } else layout.columns.right.panels.push(id);
+        const at = layout.columns.right.panels.indexOf("layers");
+        layout.columns.right.panels.splice(at < 0 ? layout.columns.right.panels.length : at, 0, id);
         seen.add(id);
-        // Panels added after an old layout was saved keep their initial visibility.
-        if (id === "sfx" || id === "brushes" || id === "actions") layout.hidden = Object.assign({}, layout.hidden, { [id]: true });
-        if (!layout.heights[id]) layout.heights = Object.assign({}, layout.heights, { [id]: fresh().heights[id] });
       });
+      layout.railOpen = layout.rail.includes(saved.railOpen) && !layout.hidden[saved.railOpen] ? saved.railOpen : null;
       return layout;
     } catch (error) {
       return fresh();
@@ -244,28 +262,75 @@
     geometry.columns[name] = { x, w, parts };
   };
 
+  const RAIL_ICONS = {
+    typer: '<span class="ws-rail__letters">T</span>',
+    navigator: '<svg viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12"/><path d="M6 13 9 9l2 2 2-3 3 5M6 4V2m8 2V2M6 18v-2m8 2v-2"/></svg>',
+    color: "",
+    styles: '<svg viewBox="0 0 20 20"><path d="m10 2 2.3 4.8 5.2.7-3.8 3.7.9 5.3-4.6-2.5-4.6 2.5.9-5.3-3.8-3.7 5.2-.7z"/></svg>',
+    brushes: '<svg viewBox="0 0 20 20"><path d="m13 3 4 4-8 8-4-4zM5 11l4 4M4 12c-3 3-1 5-3 6 4 0 7 0 7-3"/></svg>',
+    actions: '<svg viewBox="0 0 20 20"><path d="m6 3 10 7-10 7z"/></svg>',
+    layers: '<svg viewBox="0 0 20 20"><path d="m10 2 8 4-8 4-8-4zM2 10l8 4 8-4M2 14l8 4 8-4"/></svg>',
+    character: '<span class="ws-rail__letters">Aa</span>',
+    sfx: '<svg viewBox="0 0 20 20"><path d="M10 2v16M2 10h16M4 4l12 12M4 16 16 4"/></svg>',
+    breaks: '<svg viewBox="0 0 20 20"><path d="M3 5h14M3 10h9M3 15h14"/></svg>',
+    history: '<svg viewBox="0 0 20 20"><path d="M4 6a7 7 0 1 1-1 7M4 2v4h4M10 6v5l3 2"/></svg>',
+  };
+  const toggleRail = (id) => {
+    if (!layout.rail.includes(id)) return;
+    layout.railOpen = layout.railOpen === id ? null : id;
+    layout.hidden[id] = false;
+    apply();
+    save();
+  };
+  const renderRail = () => {
+    rail.textContent = "";
+    rail.setAttribute("aria-label", T("Collapsed panels"));
+    layout.rail.forEach((id) => {
+      if (layout.hidden[id]) return;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ws-rail__button";
+      button.dataset.panel = id;
+      const title = element(id).querySelector(".dock__head > span");
+      const name = title ? title.textContent : id;
+      const open = layout.railOpen === id;
+      button.classList.toggle("is-open", open);
+      button.title = `${T(open ? "Collapse panel" : "Expand panel")}: ${name}`;
+      button.setAttribute("aria-label", button.title);
+      button.setAttribute("aria-expanded", String(open));
+      button.innerHTML = RAIL_ICONS[id] || '<span class="ws-rail__letters">▦</span>';
+      button.addEventListener("click", () => toggleRail(id));
+      rail.appendChild(button);
+    });
+  };
+
   const apply = () => {
     const touch = Shell.touch;
     work.classList.toggle("is-custom", !touch);
     PANELS.forEach((id) => {
       const leader = leaderOf(id);
-      element(id).hidden = !touch && (Boolean(layout.hidden[id]) || Boolean(leader && activeIn(leader) !== id));
+      const collapsed = layout.rail.includes(id) && layout.railOpen !== id;
+      element(id).hidden = !touch && (Boolean(layout.hidden[id]) || collapsed || Boolean(leader && activeIn(leader) !== id));
+      element(id).classList.toggle("is-rail-flyout", !touch && layout.railOpen === id && !layout.hidden[id]);
     });
     work.querySelectorAll(".ws-split, .ws-tabs").forEach((split) => split.remove());
     if (touch) {
       Object.keys(ELEMENTS).map(element).concat(docs).forEach((el) => {
         POSITION.forEach((key) => { el.style[key] = ""; });
-        el.classList.remove("is-floating", "is-tabbed");
+        el.classList.remove("is-floating", "is-tabbed", "is-rail-flyout");
       });
+      rail.hidden = true;
       PS.announce("workspace");
       return;
     }
+    // Keep the strip present even when every icon is closed: it remains a valid drop target.
+    rail.hidden = false;
     const W = work.clientWidth;
     const H = work.clientHeight;
     geometry = { columns: {}, docs: null, width: W, height: H };
 
     let from = 0;
-    let to = W;
+    let to = rail.hidden ? W : W - RAIL;
     let top = 0;
     let bottom = H;
     const tools = element("tools");
@@ -296,7 +361,7 @@
     const total = wanted.reduce((sum, width) => sum + (width ? width + SPLIT : 0), 0);
     const room = to - from - MIN_DOCS;
     const ratio = total > room && total > 0 ? Math.max(0.3, room / total) : 1;
-    const [leftW, middleW, rightW] = wanted.map((width) => Math.round(width * ratio));
+    const [leftW, rightW] = wanted.map((width) => Math.round(width * ratio));
     let docsFrom = from;
     let docsTo = to;
     if (leftW) {
@@ -309,14 +374,27 @@
       addSplit("v", to - rightW - SPLIT, top, SPLIT, tall, widthSplit("right", -1));
       docsTo = to - rightW - SPLIT;
     }
-    if (middleW) {
-      stack("middle", docsTo - middleW, middleW, top, tall);
-      addSplit("v", docsTo - middleW - SPLIT, top, SPLIT, tall, widthSplit("middle", -1));
-      docsTo = docsTo - middleW - SPLIT;
-    }
     place(docs, docsFrom, top, docsTo - docsFrom, tall);
     geometry.docs = { x: docsFrom, w: docsTo - docsFrom };
     geometry.to = to;
+    geometry.rail = { x: to, w: rail.hidden ? 0 : RAIL };
+    place(rail, to, 0, RAIL, H);
+    renderRail();
+    if (layout.railOpen && !layout.hidden[layout.railOpen]) {
+      const id = layout.railOpen;
+      const button = rail.querySelector(`[data-panel="${id}"]`);
+      const index = layout.rail.filter((item) => !layout.hidden[item]).indexOf(id);
+      const rect = layout.railRects[id] || {};
+      const el = element(id);
+      const width = Math.min(rect.w || layout.heights[id] && MIN[id][0] * 1.5 || 320, Math.max(180, to - from - 40));
+      const height = Math.min(rect.h || layout.heights[id] || 300, Math.max(HEAD + 20, tall));
+      const buttonY = button ? button.offsetTop + button.offsetHeight / 2 : index * RAIL_STEP + RAIL_STEP / 2;
+      const x = clamp(rect.x == null ? to - 5 - width : rect.x, Math.max(0, from), Math.max(0, to - width - 5));
+      const y = clamp(rect.y == null ? buttonY - height / 2 : rect.y, top, Math.max(top, bottom - height));
+      place(el, x, y, width, height);
+      el.style.zIndex = "40";
+      geometry.railFlyout = { id, x, y, w: width, h: height };
+    }
 
     layout.order = layout.order.filter((id) => layout.floating[id]);
     Object.keys(layout.floating).forEach((id) => {
@@ -351,6 +429,9 @@
   hintBox.hidden = true;
 
   const removeFromColumns = (id) => {
+    if (layout.railOpen === id) layout.railOpen = null;
+    layout.rail = layout.rail.filter((item) => item !== id);
+    delete layout.railRects[id];
     const oldLeader = leaderOf(id);
     if (oldLeader) {
       const old = layout.tabs[oldLeader];
@@ -389,6 +470,7 @@
     const W = geometry.width;
     if (id === "tools") {
       if (x < 56) return { tools: "left", rect: { x: 0, y: 0, w: TOOLS, h: H } };
+      if (x > geometry.to && !rail.hidden) return { tools: "right", rect: { x: geometry.to - TOOLS, y: 0, w: TOOLS, h: H } };
       if (x > W - 56) return { tools: "right", rect: { x: W - TOOLS, y: 0, w: TOOLS, h: H } };
       if (y < 40) return { tools: "top", rect: { x: 0, y: 0, w: W, h: TOOLS } };
       if (y > H - 40) return { tools: "bottom", rect: { x: 0, y: H - TOOLS, w: W, h: TOOLS } };
@@ -396,15 +478,13 @@
     }
     const top = geometry.top || 0;
     const bottom = geometry.bottom || H;
+    if (!rail.hidden && x >= geometry.to) return { rail: true, rect: { x: geometry.to + 4, y: top + 4, w: RAIL - 8, h: bottom - top - 8 } };
     const edge = 36;
     const emptyOf = (name) => !geometry.columns[name] || !geometry.columns[name].parts.some((part) => part.id !== id);
     if (emptyOf("left") && !geometry.columns.left && x >= geometry.docs.x && x < geometry.docs.x + edge) {
       return { column: "left", before: null, rect: { x: geometry.docs.x, y: top, w: edge, h: bottom - top } };
     }
     if (!geometry.columns.right && x > geometry.to - edge) return { column: "right", before: null, rect: { x: geometry.to - edge, y: top, w: edge, h: bottom - top } };
-    if (!geometry.columns.middle && x > geometry.docs.x + geometry.docs.w - edge && x <= geometry.docs.x + geometry.docs.w) {
-      return { column: "middle", before: null, rect: { x: geometry.docs.x + geometry.docs.w - edge, y: top, w: edge, h: bottom - top } };
-    }
     for (const name of COLUMNS) {
       const column = geometry.columns[name];
       if (!column || x < column.x || x > column.x + column.w) continue;
@@ -458,6 +538,13 @@
     }
     removeFromColumns(id);
     delete layout.floating[id];
+    if (target && target.rail) {
+      layout.railRects[id] = { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
+      layout.rail.push(id);
+      layout.railOpen = id;
+      layout.hidden[id] = false;
+      return;
+    }
     if (!target) {
       // Out of a column: small enough for its bottom edge to be within reach
       if (!wasFloating) rect.h = Math.min(rect.h, Math.round(geometry.height * 0.8));
@@ -493,6 +580,10 @@
       if (!lifted) {
         if (Math.hypot(next.clientX - startX, next.clientY - startY) < 4) return;
         lifted = true;
+        if (layout.railOpen === id) {
+          layout.railOpen = null;
+          apply();
+        }
         el.classList.add("is-moving");
         el.style.zIndex = 40;
         // Out of a row, the tools stand upright again, held by their grip
@@ -522,7 +613,8 @@
 
   const EDGES = ["n", "e", "s", "w", "ne", "se", "sw", "nw"];
   const startResize = (id, el, edge, event) => {
-    const rect = Object.assign({}, layout.floating[id]);
+    const flyout = layout.railOpen === id;
+    const rect = Object.assign({}, flyout ? layout.railRects[id] || geometry.railFlyout : layout.floating[id]);
     const startX = event.clientX;
     const startY = event.clientY;
     const [minW, minH] = MIN[id];
@@ -540,7 +632,8 @@
         out.h = Math.max(minH, rect.h - dy);
         out.y = rect.y + rect.h - out.h;
       }
-      layout.floating[id] = out;
+      if (flyout) layout.railRects[id] = out;
+      else layout.floating[id] = out;
       apply();
     }, save);
   };
@@ -568,6 +661,8 @@
   const isVisible = (id) => !layout.hidden[id];
   const setVisible = (id, shown) => {
     layout.hidden[id] = !shown;
+    if (shown && layout.rail.includes(id)) layout.railOpen = id;
+    if (!shown && layout.railOpen === id) layout.railOpen = null;
     const leader = leaderOf(id);
     if (leader && shown) layout.tabs[leader].active = id;
     apply();
@@ -602,7 +697,13 @@
 
   const init = (translate) => {
     T = translate;
-    work.appendChild(hintBox);
+    work.append(rail, hintBox);
+    work.addEventListener("pointerdown", (event) => {
+      if (!layout.railOpen || event.target.closest(".is-rail-flyout, .ws-rail__button")) return;
+      layout.railOpen = null;
+      apply();
+      save();
+    });
     PANELS.forEach((id) => {
       const el = element(id);
       const head = el.querySelector(".dock__head");
@@ -637,7 +738,7 @@
         const handle = document.createElement("div");
         handle.className = `ws-grip ws-grip--${edge}`;
         handle.addEventListener("pointerdown", (event) => {
-          if (layout.floating[id]) startResize(id, el, edge, event);
+          if (layout.floating[id] || layout.railOpen === id) startResize(id, el, edge, event);
         });
         el.appendChild(handle);
       });

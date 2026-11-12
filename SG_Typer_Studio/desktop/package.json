@@ -1,7 +1,7 @@
 {
   "name": "sg-typer-studio",
   "productName": "SG Typer Studio",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "A Windows desktop workspace for manga and comics typesetters.",
   "author": "Syndicate",
   "license": "UNLICENSED",
@@ -14,7 +14,7 @@
     "dist": "npm run content && electron-builder --win --x64 --publish never",
     "dist:win": "npm run content && electron-builder --win --x64 --publish never",
     "configure:github": "node scripts/configure-github.js",
-    "test:unit": "node --test scripts/test-content.js scripts/test-curves.js scripts/test-healing.js scripts/test-navigation.js scripts/test-brushes.js scripts/test-styles-smudge.js scripts/test-actions.js scripts/test-integrations.js scripts/test-updates.js scripts/test-firefly.js scripts/test-firefly-credits.js scripts/test-generative-levels.js scripts/test-profile-migration.js"
+    "test:unit": "node --test scripts/test-content.js scripts/test-curves.js scripts/test-healing.js scripts/test-navigation.js scripts/test-brushes.js scripts/test-styles-smudge.js scripts/test-actions.js scripts/test-integrations.js scripts/test-updates.js scripts/test-firefly.js scripts/test-firefly-credits.js scripts/test-generative-levels.js scripts/test-profile-migration.js scripts/test-text-engine.js scripts/test-workspace-rail.js"
   },
   "devDependencies": {
     "electron": "45.2.1",
@@ -89,7 +89,7 @@
       {
         "provider": "github",
         "owner": "Karpenator",
-        "repo": "SG-Typer-Studio",
+        "repo": "Syndicate_Typer_Studio",
         "releaseType": "release"
       }
     ]

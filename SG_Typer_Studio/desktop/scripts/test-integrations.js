@@ -96,7 +96,7 @@ test("TypeR Block and Short follow Photoshop's paragraph-to-point insertion pipe
   assert.ok(engine.includes("createTextLayerInSelection(data, point)"), "the panel's point argument must reach the host");
   assert.ok(engine.includes("createTextLayersInStoredSelections(data, point)"), "multi-bubble insertion accepts its fallback point mode");
   assert.ok(engine.includes("data.pointModes && data.pointModes[i] !== undefined"), "each style's Block/Short choice is honoured");
-  assert.ok(engine.includes("classicParams(doc, Object.assign({}, data, { textSizeOverride: size }), selection.bounds, Boolean(point))"));
+  assert.ok(engine.includes("classicParams(doc, Object.assign({}, data, { textSizeOverride: size }), openedBubbleBounds(doc, selection), Boolean(point))"), "classic insertion centres on the opened bubble, not its tail");
   assert.ok(engine.includes('lt.textShape = [{ textType: "point", orientation: "horizontal" }];\n    } else {\n      // Photoshop then fits the paragraph box vertically'), "only Short converts the laid-out paragraph to point text");
   assert.ok(engine.includes("const rows = layout.wrapped.map((runs) => ({ runs }));"), "Short preserves the actual renderer's soft wraps");
   assert.ok(engine.includes("lt.textStyleRange = rangesOfLines(rows, base);"), "inserted line breaks preserve rich-text ranges");

@@ -227,7 +227,7 @@
 
   const isTurned = (transform) => Boolean(transform) && (Math.abs(transform[1]) > 0.001 || Math.abs(transform[2]) > 0.001);
 
-  const paramsFromPsd = (text, doc) => {
+  const paramsFromPsd = (text, doc, txt2) => {
     const transform = text.transform || [1, 0, 0, 1, 0, 0];
     const scale = Math.hypot(transform[1] || 0, transform[3] === undefined ? 1 : transform[3]) || 1;
     const value = String(text.text || "").replace(/\r\n?|\n/g, "\r");
@@ -249,7 +249,7 @@
     const top = bounds ? bounds[1] : 0;
     const originX = (transform[4] || 0) + (isTurned(transform) ? transform[0] * left + transform[2] * top : left * scale);
     const originY = (transform[5] || 0) + (isTurned(transform) ? transform[1] * left + transform[3] * top : top * scale);
-    return {
+    const params = {
       layerText: {
         textKey: value,
         antiAlias: ANTI_ALIAS_IN[text.antiAlias] || "antiAliasSmooth",
@@ -261,6 +261,7 @@
           : { textType: "point", orientation: text.orientation === "vertical" ? "vertical" : "horizontal" }],
       },
     };
+    return txt2 && window.TypeRTxt2 ? window.TypeRTxt2.apply(text, txt2, params) : params;
   };
 
   // A stroke's Position: Photoshop's names, TypeR's
@@ -579,9 +580,9 @@
           return;
         }
         if (node.text) {
-          const params = paramsFromPsd(node.text, doc);
+          const params = paramsFromPsd(node.text, doc, psd.engineData);
           params.layerText.textStyleRange.forEach((range) => fontNames.push(range.textStyle.fontPostScriptName));
-          const layer = Object.assign(common(node, parent), { kind: "text", params, stroke: strokeFromEffects(node.effects), raster: null });
+          const layer = Object.assign(common(node, parent), { kind: "text", params, stroke: strokeFromEffects(node.effects), raster: null, textIndex: node.text.index });
           // Its shadow, glows and overlays, drawn around and on Photoshop's own letters
           const effects = effectsFromPsd(node.effects, globalAngle);
           if (effects) layer.effects = effects;
@@ -678,7 +679,7 @@
       const path = parentPath ? parentPath + " / " + name : name;
       const visible = parentVisible && !node.hidden;
       if (node.children) walk(node.children, path, visible);
-      else if (node.text) layers.push({ name, path, visible, params: paramsFromPsd(node.text, doc), stroke: strokeFromEffects(node.effects) });
+      else if (node.text) layers.push({ name, path, visible, params: paramsFromPsd(node.text, doc, psd.engineData), stroke: strokeFromEffects(node.effects) });
     });
     walk(psd.children, "", true);
     return { resolution: doc.resolution, layers };
@@ -706,6 +707,8 @@
       underline: Boolean(style.underline) && style.underline !== "underlineOff",
       strikethrough: Boolean(style.strikethrough) && style.strikethrough !== "strikethroughOff",
       autoKerning: style.autoKern !== "manual",
+      // Non-ag-psd metadata consumed by txt2.js; the exact mode isn't representable above.
+      kerningMode: style.autoKern === "opticalKern" ? "opticalKern" : style.autoKern === "manual" ? "manual" : "metricsKern",
       ligatures: style.ligature !== false,
       dLigatures: Boolean(style.altligature),
       language: PS().textLanguageNumber(style.textLanguage),
@@ -724,6 +727,7 @@
     const spin = (layer.rotated && layer.spin) || [1, 0, 0, 1];
     const out = {
       text: value,
+      index: layer.textIndex,
       transform: [spin[0], spin[1], spin[2], spin[3], (lt.textClickPoint.horizontal / 100) * doc.width, (lt.textClickPoint.vertical / 100) * doc.height],
       antiAlias: ANTI_ALIAS_OUT[lt.antiAlias] || "smooth",
       shapeType: box ? "box" : "point",
@@ -955,6 +959,14 @@
           transform[4] += moveX;
           transform[5] += moveY;
           node.text = Object.assign({}, layer.raw.text, { transform });
+          const ranges = layer.params.layerText.textStyleRange || [];
+          const baseStyle = ranges[0] && ranges[0].textStyle;
+          node.text.style = Object.assign({}, node.text.style, { kerningMode: baseStyle && baseStyle.autoKern });
+          if (node.text.styleRuns) node.text.styleRuns = node.text.styleRuns.map((run) => {
+            const from = node.text.styleRuns.slice(0, node.text.styleRuns.indexOf(run)).reduce((sum, item) => sum + item.length, 0);
+            const range = ranges.find((item) => from >= item.from && from < item.to) || ranges[ranges.length - 1];
+            return Object.assign({}, run, { style: Object.assign({}, run.style, { kerningMode: range && range.textStyle.autoKern }) });
+          });
         }
         // Its effects changed in TypeR go into the layer's record: its pixels stay the file's
         effectsOut(node, layer, doc);
@@ -1146,6 +1158,7 @@
     if (xmp === undefined) delete imageResources.xmpMetadata;
     else imageResources.xmpMetadata = xmp;
     const root = Object.assign({}, source, { width: doc.width, height: doc.height, bitsPerChannel: 8, canvas: composite, children, imageResources });
+    if (window.TypeRTxt2) root.engineData = window.TypeRTxt2.build(source.engineData, children);
     if (!root.colorMode) root.colorMode = 3;
     // A greyscale file given colour here (a Gradient, a coloured text, a pasted picture…) goes
     // on in RGB, as Photoshop's Image > Mode > RGB Color would: in greyscale it would get only

@@ -15,6 +15,7 @@
   const EXTENSION_ID = "com.typer.web";
 
   const Fonts = window.TypeRFonts;
+  const OpticalKerning = window.TypeROpticalKerning;
   const FONTS = Fonts.BUILTIN;
   const MAX_HISTORY = 150;
 
@@ -43,7 +44,7 @@
   const setRunFont = (ctx, textStyle, sizePx) => {
     ctx.font = cssFont(textStyle, sizePx);
     if ("letterSpacing" in ctx) ctx.letterSpacing = textStyle.tracking ? `${(textStyle.tracking / 1000) * sizePx}px` : "0px";
-    if ("fontKerning" in ctx) ctx.fontKerning = textStyle.autoKern === "manual" ? "none" : "normal";
+    if ("fontKerning" in ctx) ctx.fontKerning = textStyle.autoKern === "manual" || textStyle.autoKern === "opticalKern" ? "none" : "normal";
     if ("fontVariantCaps" in ctx) ctx.fontVariantCaps = textStyle.fontCaps === "smallCaps" ? "small-caps" : "normal";
     if ("lang" in ctx) ctx.lang = languageTagOf(textStyle);
   };
@@ -146,18 +147,25 @@
       setRunFont(measureCtx, run.style, size);
       measureCtx.textAlign = "left";
       const shown = shownText(run);
-      const m = measureCtx.measureText(shown);
       const scaleX = (run.style.horizontalScale || 100) / 100;
       const scaleY = (run.style.verticalScale || 100) / 100;
       const shift = ((run.style.impliedBaselineShift !== undefined ? run.style.impliedBaselineShift : run.style.baselineShift) || 0) * (resolution / 72);
-      placed.push({ run, shown, x: advance, size, scaleX, scaleY, shift });
-      inkLeft = Math.min(inkLeft, advance - m.actualBoundingBoxLeft * scaleX);
-      inkRight = Math.max(inkRight, advance + m.actualBoundingBoxRight * scaleX);
-      advance += m.width * scaleX;
-      ascent = Math.max(ascent, m.actualBoundingBoxAscent * scaleY + shift);
-      descent = Math.max(descent, m.actualBoundingBoxDescent * scaleY - shift);
-      fontAscent = Math.max(fontAscent, (m.fontBoundingBoxAscent || m.actualBoundingBoxAscent) * scaleY);
-      fontDescent = Math.max(fontDescent, (m.fontBoundingBoxDescent || m.actualBoundingBoxDescent) * scaleY);
+      const optical = run.style.autoKern === "opticalKern" && OpticalKerning;
+      const spacing = optical ? OpticalKerning.spacing(measureCtx, Fonts.generation + "|" + Fonts.resolve(run.style).css, cssFont(run.style, size) + "|" + languageTagOf(run.style), shown, run.style.impliedFontSize || run.style.size || 14, size) : null;
+      const parts = spacing ? spacing.chars : [shown];
+      parts.forEach((part, index) => {
+        const m = measureCtx.measureText(part);
+        const pairShift = spacing ? spacing.starts[index] : 0;
+        placed.push({ run, shown: part, x: advance + pairShift * scaleX, size, scaleX, scaleY, shift, optical: Boolean(spacing) });
+        inkLeft = Math.min(inkLeft, advance + pairShift * scaleX - m.actualBoundingBoxLeft * scaleX);
+        inkRight = Math.max(inkRight, advance + pairShift * scaleX + m.actualBoundingBoxRight * scaleX);
+        advance += m.width * scaleX;
+        ascent = Math.max(ascent, m.actualBoundingBoxAscent * scaleY + shift);
+        descent = Math.max(descent, m.actualBoundingBoxDescent * scaleY - shift);
+        fontAscent = Math.max(fontAscent, (m.fontBoundingBoxAscent || m.actualBoundingBoxAscent) * scaleY);
+        fontDescent = Math.max(fontDescent, (m.fontBoundingBoxDescent || m.actualBoundingBoxDescent) * scaleY);
+      });
+      if (spacing) advance += spacing.total * scaleX;
     });
     if (!runs.length) return { advance: 0, ascent: 0, descent: 0, inkLeft: 0, inkRight: 0, fontAscent: 0, fontDescent: 0, placed };
     return { advance, ascent, descent, inkLeft, inkRight, fontAscent, fontDescent, placed };
@@ -404,6 +412,8 @@
     let right = -Infinity;
     let top = Infinity;
     let bottom = -Infinity;
+    let opticalLeft = Infinity;
+    let opticalRight = -Infinity;
     let overflow = false;
     let contentBottom = 0;
     lines.forEach((runs, index) => {
@@ -445,6 +455,22 @@
       if (runs.length) {
         left = Math.min(left, x + m.inkLeft);
         right = Math.max(right, x + m.inkRight);
+        if (paragraph.hangingRoman && (hangLeft || hangRight)) {
+          // Hanging punctuation is ink, but not part of the optical centre of a Roman line.
+          const first = Array.from(lineText)[0];
+          const last = Array.from(lineText).slice(-1)[0];
+          const from = hangLeft && hangShare(first) ? first.length : 0;
+          const to = lineText.length - (hangRight && hangShare(last) ? last.length : 0);
+          if (to > from) {
+            const before = from ? measureRuns(sliceRuns(runs, 0, from), resolution).advance : 0;
+            const core = measureRuns(sliceRuns(runs, from, to), resolution);
+            opticalLeft = Math.min(opticalLeft, x + before + core.inkLeft);
+            opticalRight = Math.max(opticalRight, x + before + core.inkRight);
+          }
+        } else {
+          opticalLeft = Math.min(opticalLeft, x + m.inkLeft);
+          opticalRight = Math.max(opticalRight, x + m.inkRight);
+        }
         top = Math.min(top, baseline - m.ascent);
         bottom = Math.max(bottom, baseline + m.descent);
       }
@@ -464,7 +490,8 @@
       top += shift;
       bottom += shift;
     }
-    const result = { lines: out, box: rectFrom(left, top, right, bottom), frame: frame ? { width: frame.width, height: frame.autoHeight ? contentBottom : frame.height } : null, overflow, contentHeight: contentBottom, firstOffset, shift, wrapped: lines };
+    if (!isFinite(opticalLeft)) { opticalLeft = left; opticalRight = right; }
+    const result = { lines: out, box: rectFrom(left, top, right, bottom), opticalBox: rectFrom(opticalLeft, top, opticalRight, bottom), frame: frame ? { width: frame.width, height: frame.autoHeight ? contentBottom : frame.height } : null, overflow, contentHeight: contentBottom, firstOffset, shift, wrapped: lines };
     layoutCache.set(key, result);
     return remember(result);
   };
@@ -481,6 +508,7 @@
       anchor: [ax, ay],
       lines: relative.lines.map((line) => Object.assign({}, line, { x: line.x + ax, baseline: line.baseline + ay })),
       box: rectFrom(b.left + ax, b.top + ay, b.right + ax, b.bottom + ay),
+      opticalBox: rectFrom(relative.opticalBox.left + ax, relative.opticalBox.top + ay, relative.opticalBox.right + ax, relative.opticalBox.bottom + ay),
       frame: relative.frame ? rectFrom(ax, ay, ax + relative.frame.width, ay + relative.frame.height) : null,
       overflow: relative.overflow,
       contentHeight: relative.contentHeight,
@@ -1868,18 +1896,17 @@
     return { canvas: entry.canvas, x: entry.cx0 + dx, y: entry.cy0 + dy, version: entry.version };
   };
 
-  // Photoshop's anti-aliasing methods, as curves on the coverage the browser draws.
-  // Strong and Smooth were fitted on real PSDs (54 and 3 text layers); Sharp and Crisp
-  // raise the contrast of the same edge, None keeps it on or off.
-  const edgeCurve = (a, c) => Math.max(0, Math.min(1, (a - 0.6) * c + 0.5));
+  // Photoshop's anti-aliasing methods map outline coverage to opacity. Exponents above one
+  // thin the fringe (Sharp/Crisp); Strong widens it and Smooth preserves the raw coverage.
+  // These are the same mode curves as PhotoCraft's Photoshop-compatible text renderer.
   const ANTI_ALIAS = {
-    antiAliasNone: (a) => (a >= 0.6 ? 1 : 0),
-    antiAliasSharp: (a) => edgeCurve(a, 2.4),
-    antiAliasCrisp: (a) => edgeCurve(a, 1.6),
-    antiAliasStrong: (a) => a ** 1.25,
-    antiAliasSmooth: (a) => a ** 1.8,
-    antiAliasPlatformGray: (a) => a ** 1.8,
-    antiAliasPlatformLCD: (a) => a ** 1.8,
+    antiAliasNone: (a) => (a >= 0.5 ? 1 : 0),
+    antiAliasSharp: (a) => a ** 2.2,
+    antiAliasCrisp: (a) => a ** 1.35,
+    antiAliasStrong: (a) => a ** 0.55,
+    antiAliasSmooth: (a) => a,
+    antiAliasPlatformGray: (a) => a,
+    antiAliasPlatformLCD: (a) => a ** 2.2,
   };
   // The letters drawn from their outlines come out lighter and greyer than Photoshop's: 0.2 px
   // around each one brings them level, in every mode (54 Strong layers, 3 Smooth, 1 Sharp)
@@ -4658,7 +4685,7 @@
     const items = layers.map((layer) => ({ layer, box: boxOf(layer, doc), sizePixels: sizePxOf(layer.params.layerText.textStyleRange[0].textStyle, doc.resolution) }));
     if (items.some((item) => !item.box || item.box.width <= 0 || item.box.height <= 0)) return "doubleBubbleEmpty";
     const boxes = items.map((item) => item.box);
-    const selection = doc.state.selection && doc.state.selection.bounds;
+    const selection = doc.state.selection && openedBubbleBounds(doc, doc.state.selection, boxes[0]);
     // A selection holding every text's centre is the whole bubble
     if (selection && usableBubble(selection, doc) && boxes.every((box) => holds(selection, box.xMid, box.yMid))) return splitBubble(selection, boxes);
     const probes = items.map((item, i) => probeBubble(doc, item.box, item.sizePixels, boxes.filter((_, j) => j !== i)));
@@ -5983,10 +6010,19 @@
     return shifted(next, to[0] - now[0], to[1] - now[1], doc);
   };
 
-  const centredOn = (layer, doc, x, y) => {
+  const centredOn = (layer, doc, x, y, optical) => {
     // A text on a surface stays there: the surface is what sets its place
     if (layer.warp) return layer;
-    const box = boxOf(layer, doc);
+    let box = boxOf(layer, doc);
+    if (optical && layer.kind === "text") {
+      const layout = layoutLayer(layer, doc);
+      box = layout.opticalBox;
+      const spin = spinOf(layer);
+      if (spin) {
+        const { minX, minY, maxX, maxY } = spunBounds(layout.relative.opticalBox, spin);
+        box = rectFrom(layout.anchor[0] + minX, layout.anchor[1] + minY, layout.anchor[0] + maxX, layout.anchor[1] + maxY);
+      }
+    }
     return shifted(layer, x - box.xMid, y - box.yMid, doc);
   };
 
@@ -9493,7 +9529,7 @@
       if (!doc) return null;
       const d = app.textDefaults;
       const text = value || "";
-      const style = { fontPostScriptName: d.font, fontName: d.family, fontStyleName: d.style, size: d.size, impliedFontSize: d.size, autoLeading: true, tracking: 0, horizontalScale: 100, verticalScale: 100, ligature: d.ligature, textLanguage: d.language, autoKern: d.autoKern === "manual" ? "manual" : "metricsKern", color: { red: app.fg.r, green: app.fg.g, blue: app.fg.b } };
+      const style = { fontPostScriptName: d.font, fontName: d.family, fontStyleName: d.style, size: d.size, impliedFontSize: d.size, autoLeading: true, tracking: 0, horizontalScale: 100, verticalScale: 100, ligature: d.ligature, textLanguage: d.language, autoKern: d.autoKern === "manual" || d.autoKern === "opticalKern" ? d.autoKern : "metricsKern", color: { red: app.fg.r, green: app.fg.g, blue: app.fg.b } };
       const params = { layerText: { textKey: text, antiAlias: d.antiAlias || "antiAliasSmooth", textClickPoint: { horizontal: (x / doc.width) * 100, vertical: (y / doc.height) * 100 }, textStyleRange: [{ from: 0, to: text.length, textStyle: style }], paragraphStyleRange: [{ from: 0, to: text.length, paragraphStyle: Object.assign({ alignment: "center", autoLeadingPercentage: 1.2 }, d.hyphenate ? { hyphenate: true } : {}) }], textShape: [box ? { textType: "box", orientation: "horizontal", box: Object.assign({ verticalAlign: d.verticalAlign }, box) } : { textType: "point", orientation: "horizontal" }] } };
       const layer = newTextLayer(doc, params, null, text || "Text");
       commitState(doc, "Type Tool", { layers: addNewTexts(doc.state.layers, [layer], textSpotOf(doc)), activeIds: [layer.id] });
@@ -10350,9 +10386,100 @@
     return out;
   };
 
+  // TypeR's adaptive selection opening, on a temporary mask only. Filling holes first keeps
+  // the old letters from becoming gaps; erode/dilate then removes a tail thinner than the
+  // bubble without moving the selection or a single document pixel.
+  const openedBubbleBounds = (doc, selection, textBox) => {
+    const raw = selection && selection.bounds;
+    if (!raw || !selection.mask || raw.width < 3 || raw.height < 3) return raw;
+    const base = selectionBox(doc, selection);
+    const bw = base.right - base.left;
+    const bh = base.bottom - base.top;
+    if (!bw || !bh) return raw;
+    const source = new Uint8Array(bw * bh);
+    paintSelection(doc, selection, source, base.left, base.top, bw, 1);
+    let sourceArea = 0;
+    source.forEach((v) => { sourceArea += v; });
+    if (!sourceArea) return raw;
+    const filter = (input, w, h, radius, dilate) => {
+      const pass = (data, horizontal) => {
+        const out = new Uint8Array(data.length);
+        const outer = horizontal ? h : w;
+        const inner = horizontal ? w : h;
+        const deque = new Int32Array(inner + 1);
+        for (let a = 0; a < outer; a++) {
+          let head = 0;
+          let tail = 0;
+          for (let b = 0; b < inner; b++) {
+            const entering = Math.min(inner - 1, b + radius);
+            const enteringValue = data[horizontal ? a * w + entering : entering * w + a];
+            while (tail > head && (dilate ? data[horizontal ? a * w + deque[tail - 1] : deque[tail - 1] * w + a] <= enteringValue : data[horizontal ? a * w + deque[tail - 1] : deque[tail - 1] * w + a] >= enteringValue)) tail--;
+            deque[tail++] = entering;
+            while (deque[head] < b - radius) head++;
+            let value = data[horizontal ? a * w + deque[head] : deque[head] * w + a];
+            if (!dilate && (b - radius < 0 || b + radius >= inner)) value = 0;
+            out[horizontal ? a * w + b : b * w + a] = value;
+          }
+        }
+        return out;
+      };
+      return pass(pass(input, true), false);
+    };
+    const maxRadius = Math.max(0, Math.floor(Math.min(raw.width, raw.height) / 2 - 1));
+    for (let radius = Math.min(maxRadius, Math.max(4, Math.round(Math.min(raw.width, raw.height) * 0.1))); radius >= 1; radius = Math.floor(radius / 2)) {
+      const pad = radius + 1;
+      const w = bw + pad * 2;
+      const h = bh + pad * 2;
+      const filled = new Uint8Array(w * h);
+      for (let y = 0; y < bh; y++) filled.set(source.subarray(y * bw, (y + 1) * bw), (y + pad) * w + pad);
+      // Flood the exterior; every untouched zero is a hole in the bubble.
+      const queue = new Int32Array(w * h);
+      let head = 0;
+      let tail = 0;
+      const outside = new Uint8Array(w * h);
+      const add = (x, y) => {
+        const i = y * w + x;
+        if (filled[i] || outside[i]) return;
+        outside[i] = 1;
+        queue[tail++] = i;
+      };
+      for (let x = 0; x < w; x++) { add(x, 0); add(x, h - 1); }
+      for (let y = 1; y < h - 1; y++) { add(0, y); add(w - 1, y); }
+      while (head < tail) {
+        const i = queue[head++];
+        const x = i % w;
+        const y = Math.floor(i / w);
+        if (x) add(x - 1, y);
+        if (x + 1 < w) add(x + 1, y);
+        if (y) add(x, y - 1);
+        if (y + 1 < h) add(x, y + 1);
+      }
+      for (let i = 0; i < filled.length; i++) if (!outside[i]) filled[i] = 1;
+      const opened = filter(filter(filled, w, h, radius, false), w, h, radius, true);
+      let left = w;
+      let top = h;
+      let right = -1;
+      let bottom = -1;
+      let area = 0;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        if (!opened[y * w + x]) continue;
+        area++;
+        left = Math.min(left, x); right = Math.max(right, x);
+        top = Math.min(top, y); bottom = Math.max(bottom, y);
+      }
+      if (right < 0 || area < sourceArea * 0.35 || (right - left + 1) * (bottom - top + 1) < MIN_BUBBLE_AREA) continue;
+      const bounds = rectFrom(base.left + left - pad, base.top + top - pad, base.left + right + 1 - pad, base.top + bottom + 1 - pad);
+      const cx = textBox ? textBox.xMid : raw.xMid;
+      const cy = textBox ? textBox.yMid : raw.yMid;
+      if (cx < bounds.left - 1 || cx > bounds.right + 1 || cy < bounds.top - 1 || cy > bounds.bottom + 1) continue;
+      return bounds;
+    }
+    return raw;
+  };
+
   // Moves a layer so the middle of its ink lands on (x, y)
   const centreLayer = (doc, params, stroke, x, y) => {
-    const box = layoutLayer({ params, stroke }, doc).box;
+    const box = layoutLayer({ params, stroke }, doc).opticalBox;
     params.layerText.textClickPoint.horizontal += ((x - box.xMid) / doc.width) * 100;
     params.layerText.textClickPoint.vertical += ((y - box.yMid) / doc.height) * 100;
   };
@@ -10466,7 +10593,8 @@
       const selection = doc.state.selection;
       if (!selection) return JSON.stringify({ error: "noSelection" });
       if (selection.bounds.width * selection.bounds.height < 200) return JSON.stringify({ error: "smallSelection" });
-      return JSON.stringify(selection.bounds);
+      const layer = activeTextLayer(doc);
+      return JSON.stringify(openedBubbleBounds(doc, selection, layer && boxOf(layer, doc)));
     },
     getTypeRSelectionSnapshot() {
       const doc = app.doc;
@@ -10518,7 +10646,9 @@
         return JSON.stringify({ noChange: true, shiftKey: app.keys.shift, documentKey: key });
       }
       app.monitor.lastBounds = b;
-      const item = Object.assign({ shiftKey: app.keys.shift, documentKey: key }, b);
+      const layer = activeTextLayer(doc);
+      const opened = openedBubbleBounds(doc, selection, layer && boxOf(layer, doc));
+      const item = Object.assign({ shiftKey: app.keys.shift, documentKey: key }, opened);
       return JSON.stringify(Object.assign({ multiSelection: [item] }, item));
     },
     // TextShapeR's star: the text as it shows, a paragraph's lines as its box sets them
@@ -10698,7 +10828,7 @@
         const params = paramsFromStyle(item.style ? scaleForPunctuation(item.style, text) : { textProps: layer.params }, text, item.richTextRuns, kept, item.style ? doc.resolution : 0);
         params.layerText.textClickPoint = clone(layer.params.layerText.textClickPoint);
         if (boxShape(layer.params.layerText)) params.layerText.textShape = clone(layer.params.layerText.textShape);
-        else centreLayer(doc, params, null, box.xMid, box.yMid);
+        else centreLayer(doc, params, null, layoutLayer(layer, doc).opticalBox.xMid, layoutLayer(layer, doc).opticalBox.yMid);
         const stroke = (item.style && strokeToApply(item.style.stroke)) || layer.stroke;
         layers = layers.map((entry) => (entry.id === layer.id ? Object.assign({}, entry, { params, raster: null, stroke }) : entry));
       });
@@ -10717,7 +10847,7 @@
         if (!layer) return "sizeSource";
         size = layer.params.layerText.textStyleRange[0].textStyle.size;
       }
-      const params = classicParams(doc, Object.assign({}, data, { textSizeOverride: size }), selection.bounds, Boolean(point));
+      const params = classicParams(doc, Object.assign({}, data, { textSizeOverride: size }), openedBubbleBounds(doc, selection), Boolean(point));
       const layer = newTextLayer(doc, params, data.style && data.style.stroke, data.text);
       layer.source = String(data.text || "");
       commitState(doc, "TyperTools Paste", { layers: addNewTexts(doc.state.layers, [layer], textSpotOf(doc)), activeIds: [layer.id] });
@@ -10781,13 +10911,13 @@
       let layers = doc.state.layers;
       selected.forEach((layer) => {
         const box = boxOf(layer, doc);
-        let rect = placements[layer.id] || (doc.state.selection && doc.state.selection.bounds);
+        let rect = placements[layer.id] || (doc.state.selection && openedBubbleBounds(doc, doc.state.selection, box));
         if (!rect) {
           const scan = floodSelect(doc, box.xMid, box.yMid, 20);
           if (scan.bounds.width * scan.bounds.height > box.width * box.height * 60) return;
-          rect = scan.bounds;
+          rect = openedBubbleBounds(doc, scan, box);
         }
-        const moved = centredOn(layer, doc, rect.xMid, rect.yMid);
+        const moved = centredOn(layer, doc, rect.xMid, rect.yMid, true);
         layers = layers.map((entry) => (entry.id === layer.id ? moved : entry));
       });
       commitState(doc, "TyperTools Align", { layers });
@@ -10801,7 +10931,7 @@
       if (selected.length < 2 || selected.length !== doc.state.activeIds.length) return "doubleBubbleLayers";
       const rects = doubleBubbleRects(doc, selected);
       if (typeof rects === "string") return rects;
-      const moved = new Map(selected.map((layer, i) => [layer.id, centredOn(layer, doc, rects[i].xMid, rects[i].yMid)]));
+      const moved = new Map(selected.map((layer, i) => [layer.id, centredOn(layer, doc, rects[i].xMid, rects[i].yMid, true)]));
       commitState(doc, "TyperTools Align", { layers: doc.state.layers.map((layer) => moved.get(layer.id) || layer) });
       emit("align");
       return "";
