@@ -10330,24 +10330,6 @@
     return params;
   };
 
-  const wrapWords = (text, base, width, resolution) => {
-    const size = sizePxOf(base, resolution);
-    setRunFont(measureCtx, base, size);
-    const out = [];
-    String(text || "").split(/\r\n?|\n/).forEach((paragraph) => {
-      let line = "";
-      paragraph.split(/\s+/).filter(Boolean).forEach((word) => {
-        const candidate = line ? line + " " + word : word;
-        if (line && measureCtx.measureText(candidate).width > width) {
-          out.push(line);
-          line = word;
-        } else line = candidate;
-      });
-      out.push(line);
-    });
-    return out;
-  };
-
   // Moves a layer so the middle of its ink lands on (x, y)
   const centreLayer = (doc, params, stroke, x, y) => {
     const box = layoutLayer({ params, stroke }, doc).box;
@@ -10355,18 +10337,34 @@
     params.layerText.textClickPoint.vertical += ((y - box.yMid) / doc.height) * 100;
   };
 
-  const classicParams = (doc, data, bounds) => {
+  const classicParams = (doc, data, bounds, pointMode) => {
     const padding = Number(data.padding) || 0;
     const params = paramsFromStyle(scaleForPunctuation(data.style, data.text), data.text, data.richTextRuns, data.textSizeOverride, doc.resolution);
-    const base = params.layerText.textStyleRange[0].textStyle;
+    const lt = params.layerText;
+    const base = lt.textStyleRange[0].textStyle;
     // The enlarged text must not wrap in a box sized for the selection
     const enlarged = !data.textSizeOverride && data.style && isPunctuationOnly(data.text) ? Math.max(1, parseFloat(data.style.punctuationOnlyScale) || 1) : 1;
-    const lines = wrapWords(data.text, base, Math.max(24, bounds.width * 0.9 - padding * 2) * enlarged, doc.resolution);
-    if (!data.richTextRuns) {
-      params.layerText.textKey = lines.join("\r");
-      params.layerText.textStyleRange = [{ from: 0, to: params.layerText.textKey.length, textStyle: base }];
+    const width = Math.max(24, bounds.width * 0.9 - padding * 2) * enlarged;
+    // TypeR in Photoshop always lays a new selection's text out in a box first. Block keeps
+    // that paragraph text; Short converts the wrapped result to point text afterwards.
+    lt.textShape = [{ textType: "box", orientation: "horizontal", box: { width, height: Math.max(1, bounds.height), autoHeight: true } }];
+    const layout = relativeLayout(lt, doc.resolution);
+    if (pointMode) {
+      // Keep the visible soft wraps as real line breaks, as Photoshop's conversion does. Build
+      // the ranges from those lines too: added breaks must not shift rich-text formatting.
+      const rows = layout.wrapped.map((runs) => ({ runs }));
+      const key = rows.map((row) => row.runs.map((run) => run.text).join("")).join("\r");
+      lt.textKey = key;
+      lt.textStyleRange = rangesOfLines(rows, base);
+      lt.paragraphStyleRange.forEach((range) => { range.to = key.length; });
+      lt.textShape = [{ textType: "point", orientation: "horizontal" }];
+    } else {
+      // Photoshop then fits the paragraph box vertically to the text, with one size of room
+      // below it. It remains a real, editable paragraph box rather than pre-broken point text.
+      lt.textShape[0].box.autoHeight = false;
+      lt.textShape[0].box.height = Math.max(1, layout.box.height + sizePxOf(base, doc.resolution) + 2);
     }
-    params.layerText.textClickPoint = { horizontal: (bounds.xMid / doc.width) * 100, vertical: (bounds.top / doc.height) * 100 };
+    lt.textClickPoint = { horizontal: (bounds.xMid / doc.width) * 100, vertical: (bounds.top / doc.height) * 100 };
     centreLayer(doc, params, null, bounds.xMid, bounds.yMid);
     return params;
   };
@@ -10687,7 +10685,7 @@
       commitState(doc, "TyperTools Change", { layers });
       return "";
     },
-    createTextLayerInSelection(data) {
+    createTextLayerInSelection(data, point) {
       const doc = app.doc;
       if (!doc) return "doc";
       const selection = doc.state.selection;
@@ -10699,14 +10697,14 @@
         if (!layer) return "sizeSource";
         size = layer.params.layerText.textStyleRange[0].textStyle.size;
       }
-      const params = classicParams(doc, Object.assign({}, data, { textSizeOverride: size }), selection.bounds);
+      const params = classicParams(doc, Object.assign({}, data, { textSizeOverride: size }), selection.bounds, Boolean(point));
       const layer = newTextLayer(doc, params, data.style && data.style.stroke, data.text);
       layer.source = String(data.text || "");
       commitState(doc, "TyperTools Paste", { layers: addNewTexts(doc.state.layers, [layer], textSpotOf(doc)), activeIds: [layer.id] });
       emit("paste", { classic: true, layers: [layer] });
       return "";
     },
-    createTextLayersInStoredSelections(data) {
+    createTextLayersInStoredSelections(data, point) {
       const doc = app.doc;
       if (!doc) return "doc";
       const created = [];
@@ -10715,7 +10713,8 @@
       const styles = (data && data.styles) || [];
       selections.forEach((bounds, i) => {
         if (texts[i] == null) return;
-        const params = classicParams(doc, { text: texts[i], style: styles[i] || styles[0], padding: data.padding }, rectFrom(bounds.left, bounds.top, bounds.right, bounds.bottom));
+        const pointMode = data.pointModes && data.pointModes[i] !== undefined ? data.pointModes[i] : point;
+        const params = classicParams(doc, { text: texts[i], style: styles[i] || styles[0], padding: data.padding, richTextRuns: data.richTextRuns && (data.richTextRuns[i] || data.richTextRuns[data.richTextRuns.length - 1]) }, rectFrom(bounds.left, bounds.top, bounds.right, bounds.bottom), Boolean(pointMode));
         created.push(newTextLayer(doc, params, styles[i] && styles[i].stroke, texts[i]));
       });
       commitState(doc, "TyperTools Paste", { layers: addNewTexts(doc.state.layers, created, textSpotOf(doc)), activeIds: created.map((layer) => layer.id), selection: selectionAfterPaste(doc) });

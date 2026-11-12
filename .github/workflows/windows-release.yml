@@ -89,7 +89,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add SG_Typer_Studio/desktop/package.json SG_Typer_Studio/desktop/package-lock.json SG_Typer_Studio/web/whats-new.json
+          git add SG_Typer_Studio/desktop/package.json SG_Typer_Studio/desktop/package-lock.json SG_Typer_Studio/desktop/src/preload.js SG_Typer_Studio/web/whats-new.json
           if ! git diff --cached --quiet; then
             git commit -m "Release v${{ inputs.version }}"
             git push origin "HEAD:${GITHUB_REF_NAME}"

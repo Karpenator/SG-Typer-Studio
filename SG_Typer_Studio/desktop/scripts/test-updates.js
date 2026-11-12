@@ -99,9 +99,10 @@ test("network failures become bounded UI states and can be retried", async () =>
 
 test("one command moves update metadata and What's New to a clean repository", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sg-github-config-"));
-  fs.mkdirSync(path.join(root, "desktop"), { recursive: true });
+  fs.mkdirSync(path.join(root, "desktop", "src"), { recursive: true });
   fs.mkdirSync(path.join(root, "web"), { recursive: true });
   fs.writeFileSync(path.join(root, "desktop", "package.json"), JSON.stringify({ build: {} }));
+  fs.writeFileSync(path.join(root, "desktop", "src", "preload.js"), 'const releasesUrl = "https://github.com/OldOwner/Old-Studio/releases";\n');
   fs.writeFileSync(path.join(root, "web", "whats-new.json"), JSON.stringify({ github: "old", notes: [] }));
   const parsed = repositoryFrom(["https://github.com/NewOwner/Clean-Studio.git"]);
   const result = configureGitHub({ ...parsed, root });
@@ -111,6 +112,8 @@ test("one command moves update metadata and What's New to a clean repository", (
   assert.deepEqual(pkg.build.publish, [{ provider: "github", owner: "NewOwner", repo: "Clean-Studio", releaseType: "release" }]);
   const news = JSON.parse(fs.readFileSync(path.join(root, "web", "whats-new.json"), "utf8"));
   assert.equal(news.github, "https://api.github.com/repos/NewOwner/Clean-Studio/commits?per_page=1");
+  assert.ok(fs.readFileSync(path.join(root, "desktop", "src", "preload.js"), "utf8").includes(result.releases));
+  assert.doesNotThrow(() => configureGitHub({ ...parsed, root }), "reconfiguring the current provider is idempotent");
   assert.throws(() => repositoryFrom(["https://example.com/NewOwner/Clean-Studio"]));
 });
 
@@ -120,7 +123,8 @@ test("Help, IPC, packaging and Russian strings implement only the fixed GitHub p
   assert.ok(app.includes("DesktopUpdates.check()") && app.includes("DesktopUpdates.download()") && app.includes("DesktopUpdates.install()"));
   const preload = read("desktop/src/preload.js");
   for (const channel of ["updates-check", "updates-download", "updates-install", "updates-state"]) assert.ok(preload.includes(channel));
-  assert.ok(preload.includes("releasesUrl") && preload.includes('require("../package.json").build.publish[0]'));
+  assert.ok(preload.includes("releasesUrl") && preload.includes("https://github.com/Karpenator/Syndicate_Typer_Studio/releases"));
+  assert.ok(!preload.includes('require("../package.json")'), "sandboxed preload cannot read package.json");
   assert.ok(app.includes("DesktopUpdates.releasesUrl"));
   const main = read("desktop/src/main.js");
   assert.ok(main.includes('require("electron-updater")'));

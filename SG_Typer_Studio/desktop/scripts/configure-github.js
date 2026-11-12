@@ -32,11 +32,19 @@ function configureGitHub({ owner, repository, root = ROOT }) {
   pkg.build.publish = [{ provider: "github", owner, repo: repository, releaseType: "release" }];
   fs.writeFileSync(packageFile, `${JSON.stringify(pkg, null, 2)}\n`);
 
+  const releases = `https://github.com/${owner}/${repository}/releases`;
+  const preloadFile = path.join(root, "desktop", "src", "preload.js");
+  const preload = fs.readFileSync(preloadFile, "utf8");
+  const releaseSetting = /const releasesUrl = "https:\/\/github\.com\/[^"]+";/;
+  if (!releaseSetting.test(preload)) throw new Error("The preload's fixed releasesUrl could not be configured.");
+  const configured = preload.replace(releaseSetting, `const releasesUrl = "${releases}";`);
+  fs.writeFileSync(preloadFile, configured);
+
   const newsFile = path.join(root, "web", "whats-new.json");
   const news = JSON.parse(fs.readFileSync(newsFile, "utf8"));
   news.github = `https://api.github.com/repos/${owner}/${repository}/commits?per_page=1`;
   fs.writeFileSync(newsFile, `${JSON.stringify(news, null, 2)}\n`);
-  return { owner, repository, releases: `https://github.com/${owner}/${repository}/releases` };
+  return { owner, repository, releases };
 }
 
 function main() {

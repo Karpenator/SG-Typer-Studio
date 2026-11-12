@@ -5,8 +5,10 @@
 // opening in Photoshop the PSD files the page already holds.
 
 const { contextBridge, ipcRenderer, webFrame } = require("electron");
-const releaseProvider = require("../package.json").build.publish[0];
-const releasesUrl = `https://github.com/${releaseProvider.owner}/${releaseProvider.repo}/releases`;
+// Sandboxed preloads may require Electron and their own local modules, but not package.json.
+// Keep the fixed provider here: requiring the package used to abort the whole bridge, including
+// Actions, before contextBridge.exposeInMainWorld could run.
+const releasesUrl = "https://github.com/Karpenator/Syndicate_Typer_Studio/releases";
 
 webFrame.setVisualZoomLevelLimits(1, 1);
 

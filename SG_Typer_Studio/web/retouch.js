@@ -1020,6 +1020,15 @@
       const handle = handleAt(event);
       $("stage").style.cursor = handle ? (handle === "move" ? "move" : "pointer") : "";
     },
+    doubleClick(event) {
+      if (app.tool !== "gradient") return false;
+      const handle = handleAt(event);
+      if (handle !== "start" && handle !== "end") return false;
+      const input = document.querySelector(`#options .grad-end-color[data-end="${handle === "end" ? "last" : "first"}"]`);
+      if (!input || !App().openColorPicker) return false;
+      App().openColorPicker(input);
+      return true;
+    },
     drawOverlay(handles, gesture) {
       drawHeals(gesture);
       drawGradientMarks(handles, gesture);

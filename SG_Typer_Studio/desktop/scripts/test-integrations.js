@@ -7,6 +7,32 @@ const test = require("node:test");
 const root = path.join(__dirname, "..", "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 
+test("the sandboxed desktop preload exposes Actions without loading package.json", () => {
+  let exposed = null;
+  const invocations = [];
+  const ipcRenderer = {
+    invoke: (...args) => { invocations.push(args); return Promise.resolve({ ok: true }); },
+    send: () => {},
+    on: () => {},
+    removeListener: () => {},
+  };
+  const context = {
+    require(id) {
+      if (id === "electron") return {
+        contextBridge: { exposeInMainWorld: (name, bridge) => { exposed = { name, bridge }; } },
+        ipcRenderer,
+        webFrame: { setVisualZoomLevelLimits: () => {} },
+      };
+      throw new Error(`Sandbox rejected require(${id})`);
+    },
+  };
+  vm.runInNewContext(read("desktop/src/preload.js"), context);
+  assert.ok(exposed && exposed.name === "TypeRDesktop", "the complete bridge must survive sandboxed preload evaluation");
+  assert.deepEqual(Object.keys(exposed.bridge.actions), ["load", "save", "show"]);
+  exposed.bridge.actions.show();
+  assert.deepEqual(invocations, [["actions-show"]]);
+});
+
 test("Action sets and actions have persistent keyboard shortcuts and a desktop folder", () => {
   const actions = read("web/actions.js");
   for (const text of ['T("Assign to Key")', 'T("Show on Disk")', "summary.addEventListener(\"contextmenu\"", "head.addEventListener(\"contextmenu\"", "clearOtherShortcuts", "window.addEventListener(\"keydown\""]) {
@@ -24,6 +50,18 @@ test("Action sets and actions have persistent keyboard shortcuts and a desktop f
   assert.ok(main.includes('ipcMain.handle("actions-save"'));
 });
 
+test("TypeR Block and Short follow Photoshop's paragraph-to-point insertion pipeline", () => {
+  const engine = read("web/photoshop.js");
+  assert.ok(engine.includes("createTextLayerInSelection(data, point)"), "the panel's point argument must reach the host");
+  assert.ok(engine.includes("createTextLayersInStoredSelections(data, point)"), "multi-bubble insertion accepts its fallback point mode");
+  assert.ok(engine.includes("data.pointModes && data.pointModes[i] !== undefined"), "each style's Block/Short choice is honoured");
+  assert.ok(engine.includes("classicParams(doc, Object.assign({}, data, { textSizeOverride: size }), selection.bounds, Boolean(point))"));
+  assert.ok(engine.includes('lt.textShape = [{ textType: "point", orientation: "horizontal" }];\n    } else {\n      // Photoshop then fits the paragraph box vertically'), "only Short converts the laid-out paragraph to point text");
+  assert.ok(engine.includes("const rows = layout.wrapped.map((runs) => ({ runs }));"), "Short preserves the actual renderer's soft wraps");
+  assert.ok(engine.includes("lt.textStyleRange = rangesOfLines(rows, base);"), "inserted line breaks preserve rich-text ranges");
+  assert.ok(!engine.includes("const wrapWords ="), "insertion no longer uses a second, divergent line-wrapper");
+});
+
 test("What is New follows GitHub and About credits the original projects", () => {
   const news = read("web/whats-new.js");
   assert.ok(news.includes("data.github ? await fetchJson(data.github, 6000)"));
@@ -39,6 +77,31 @@ test("What is New follows GitHub and About credits the original projects", () =>
   const bridge = read("web/bridge.js");
   const retired = bridge.match(/const RETIRED_EXTERNAL = \/(.+)\/i;/);
   assert.ok(retired && !retired[1].includes("ScanR"), "credited project pages are not blocked");
+});
+
+test("gradient end pickers are non-modal, movable and sample the page without blocking navigation", () => {
+  const app = read("web/app.js");
+  const retouch = read("web/retouch.js");
+  assert.ok(retouch.includes("doubleClick(event)"), "live gradient handles own their double-click");
+  assert.ok(retouch.includes('App().openColorPicker(input)'), "the double-click opens that end's actual colour field");
+  assert.ok(app.includes("window.TypeRRetouch.doubleClick(event)"));
+  assert.ok(app.includes("modal.show();"), "the picker must not inert the stage");
+  assert.ok(!app.includes("modal.showModal();\n    hexField.focus();"), "the colour picker is no longer modal");
+  assert.ok(app.includes('const STORE_PICKER_POSITION = "typer.web.picker.position"'));
+  assert.ok(app.includes("keepPickerPosition(modal);"), "dragging and closing remember the viewport position");
+  assert.ok(app.includes("sampleColorForPicker(color);"), "stage colours go to the open picker");
+  assert.ok(app.includes("Boolean(sampleColorForPicker)"), "the stage becomes an eyedropper while the picker is open");
+  assert.ok(app.includes("modalBlocksPage() || ui.layerStyle"), "Space and other navigation keys still reach the page");
+});
+
+test("Magic Wand and selection cursors are distinct and contrast with the page beneath them", () => {
+  const app = read("web/app.js");
+  const css = read("web/app.css");
+  assert.ok(!css.includes('.stage[data-tool="wand"], .stage[data-tool="magicEraser"]'));
+  assert.ok(css.includes('.stage[data-tool="wand"] { cursor: url("data:image/svg+xml,'));
+  assert.ok(app.includes('app.tool === "wand" ? "wand" : "crosshair"'));
+  assert.ok(app.includes('docCanvas.getContext("2d").getImageData(x, y, 1, 1).data'));
+  assert.ok(app.includes('lightness >= 150 ? "#000000" : "#ffffff"'));
 });
 
 test("Help opens the official SG Typer Studio Discord invite externally", () => {

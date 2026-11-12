@@ -229,8 +229,13 @@
   // Its page named when there are several open
   const onPage = (text, doc) => (doc && app.docs.length > 1 ? `${text} · ${doc.name}` : text);
 
+  let closeColorPicker = null;
+  let sampleColorForPicker = null;
+  const modalBlocksPage = () => ui.modal.open && !ui.modal.classList.contains("modal--picker");
+
   // A dialog: resolves with the values of its fields, or null when cancelled
   const dialog = ({ title, body, fields, ok, cancel, also, link, ready, keepOpen }) => new Promise((resolve) => {
+    if (closeColorPicker) closeColorPicker(false);
     const modal = ui.modal;
     modal.textContent = "";
     modal.className = "modal";
@@ -367,7 +372,23 @@
     return [h * 60, max ? (span / max) * 100 : 0, (max / 255) * 100];
   };
   const STORE_SWATCHES = "typer.web.swatches";
+  const STORE_PICKER_POSITION = "typer.web.picker.position";
   const MAX_SWATCHES = 24;
+  const readPickerPosition = () => {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(STORE_PICKER_POSITION));
+      return saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) ? saved : null;
+    } catch (error) {
+      return null;
+    }
+  };
+  const keepPickerPosition = (modal) => {
+    try {
+      window.localStorage.setItem(STORE_PICKER_POSITION, JSON.stringify({ x: parseFloat(modal.style.left), y: parseFloat(modal.style.top) }));
+    } catch (error) {
+      // A movable picker still keeps its place for this opening when storage is unavailable.
+    }
+  };
   const readSwatches = () => {
     try {
       const saved = JSON.parse(window.localStorage.getItem(STORE_SWATCHES));
@@ -379,6 +400,7 @@
 
   // Tried out as it changes, as the browser's own picker did. Cancel takes all of it back.
   const openColorPicker = (input) => {
+    if (closeColorPicker) closeColorPicker(true);
     const modal = ui.modal;
     const original = input.value;
     const historyAt = app.doc ? app.doc.historyIndex : -1;
@@ -470,17 +492,28 @@
     hexField.addEventListener("blur", () => show());
 
     const right = make("div", "picker__right", body);
+    let finished = false;
     const done = (keep) => {
+      if (finished) return;
+      finished = true;
+      if (modal.open) keepPickerPosition(modal);
       modal.classList.remove("modal--picker");
       modal.style.transform = "";
+      modal.style.position = "";
+      modal.style.margin = "";
+      modal.style.left = "";
+      modal.style.top = "";
       modal.onkeydown = null;
-      modal.close();
+      if (modal.open) modal.close();
       cancelAnimationFrame(frame);
       frame = 0;
+      sampleColorForPicker = null;
+      closeColorPicker = null;
       apply(keep ? hex() : original);
       if (keep) input.dispatchEvent(new Event("change", { bubbles: true }));
       else ops.rollbackHistory(historyAt);
     };
+    closeColorPicker = done;
     const yes = make("button", "btn btn--main", right, "OK");
     yes.type = "button";
     yes.addEventListener("click", () => done(true));
@@ -612,21 +645,28 @@
       changed();
     });
 
-    // Its title moves it off what it is trying the colour on
+    // Its title moves it off what it is trying the colour on. Keep real viewport coordinates,
+    // not a temporary transform, so the next picker opens where this one was left.
     head.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
       event.preventDefault();
       head.setPointerCapture(event.pointerId);
-      const was = new DOMMatrixReadOnly(getComputedStyle(modal).transform);
-      const fromX = event.clientX - was.m41;
-      const fromY = event.clientY - was.m42;
-      const move = (moved) => { modal.style.transform = `translate(${moved.clientX - fromX}px, ${moved.clientY - fromY}px)`; };
+      const was = modal.getBoundingClientRect();
+      const fromX = event.clientX - was.left;
+      const fromY = event.clientY - was.top;
+      const move = (moved) => {
+        modal.style.left = `${Math.max(8, Math.min(window.innerWidth - modal.offsetWidth - 8, moved.clientX - fromX))}px`;
+        modal.style.top = `${Math.max(8, Math.min(window.innerHeight - modal.offsetHeight - 8, moved.clientY - fromY))}px`;
+      };
       const end = () => {
         head.removeEventListener("pointermove", move);
         head.removeEventListener("pointerup", end);
+        head.removeEventListener("pointercancel", end);
+        keepPickerPosition(modal);
       };
       head.addEventListener("pointermove", move);
       head.addEventListener("pointerup", end);
+      head.addEventListener("pointercancel", end);
     });
 
     modal.oncancel = (event) => {
@@ -636,12 +676,30 @@
     // Enter is OK, but on Cancel and the other buttons, which it presses. A swatch or the
     // current colour is a colour chosen: Enter takes it.
     modal.onkeydown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        done(false);
+        return;
+      }
       if (event.key !== "Enter" || event.isComposing || (event.target.tagName === "BUTTON" && !event.target.closest(".picker__swatches, .picker__compare"))) return;
       event.preventDefault();
+      event.stopPropagation();
       done(true);
     };
+    // A non-modal dialog: the stage keeps its pointer and keyboard navigation. Its normal click
+    // is temporarily an eyedropper; Space, the middle button and Zoom retain their priority.
+    sampleColorForPicker = (color) => {
+      setRgb(color.r, color.g, color.b);
+      changed();
+    };
     show();
-    modal.showModal();
+    modal.show();
+    modal.style.position = "fixed";
+    modal.style.margin = "0";
+    const remembered = readPickerPosition();
+    modal.style.left = `${remembered ? Math.max(8, Math.min(window.innerWidth - modal.offsetWidth - 8, remembered.x)) : Math.max(8, (window.innerWidth - modal.offsetWidth) / 2)}px`;
+    modal.style.top = `${remembered ? Math.max(8, Math.min(window.innerHeight - modal.offsetHeight - 8, remembered.y)) : Math.max(8, (window.innerHeight - modal.offsetHeight) / 2)}px`;
     hexField.focus();
     hexField.select();
   };
@@ -4511,7 +4569,7 @@
   };
   const genActive = () => genJobs.some((job) => job.state === "waiting" || job.state === "drawing" || job.state === "aligning" || job.state === "settling");
   // Something under way that a new layer would disturb: it lands once it's over
-  const pageBusy = () => Boolean(gesture || polygon || scrubbing || ui.modal.open || ui.layerStyle || !ui.editor.hidden || (app.doc && app.doc.live) || transformOf() || cropOf() || warpedLayer() || (window.TypeRReshapeTool && window.TypeRReshapeTool.busy()));
+  const pageBusy = () => Boolean(gesture || polygon || scrubbing || modalBlocksPage() || ui.layerStyle || !ui.editor.hidden || (app.doc && app.doc.live) || transformOf() || cropOf() || warpedLayer() || (window.TypeRReshapeTool && window.TypeRReshapeTool.busy()));
   // Resolves once nothing is under way on `doc`, or at once when it isn't the page shown
   const pageFree = (doc) => new Promise((resolve) => {
     const check = () => (app.doc !== doc || !pageBusy() ? resolve() : setTimeout(check, 250));
@@ -6308,7 +6366,7 @@
   // Down makes it harder, up softer.
   const isBrushAdjust = (event) => (event.button === 2 && event.altKey) || (IS_MAC && event.button === 0 && event.ctrlKey && event.altKey);
   // Alt turns the brush into the eyedropper while it is held, except during what it is already doing
-  const isSampling = (event) => (app.tool === "brush" || app.tool === "gradient") && event.altKey && !event.ctrlKey && !event.metaKey && !spacing;
+  const isSampling = (event) => (Boolean(sampleColorForPicker) && !spacing) || ((app.tool === "brush" || app.tool === "gradient") && event.altKey && !event.ctrlKey && !event.metaKey && !spacing);
   // Ctrl or Cmd sets the wand aside for as long as it is held: a click on a text edits it, a drag
   // moves it, and nothing gets selected.
   const wandSetAside = (event) => app.tool === "wand" && (event.ctrlKey || event.metaKey) && !event.altKey;
@@ -6318,6 +6376,37 @@
   const LENDS_MOVE = new Set(["rectangle", "ellipse", "lasso", "polygon", "brush", "eraser", "magicEraser", "stamp", "healing", "heal", "smudge", "gradient", "eyedropper", "text"]);
   const moveLent = (event) => LENDS_MOVE.has(app.tool) && (IS_MAC ? event.metaKey : event.ctrlKey) && !spacing && !polygon && Boolean(app.doc) && !transformOf();
   let hoverAt = null;
+  const ADAPTIVE_CURSOR_TOOLS = new Set(["wand", "magicEraser", "clean", "rectangle", "ellipse", "lasso", "polygon", "crop", "gradient"]);
+  const adaptiveCursor = (kind, color) => {
+    // Choose the higher-contrast ink for the page pixel, rather than for the stage's theme.
+    const lightness = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+    const ink = lightness >= 150 ? "#000000" : "#ffffff";
+    const paths = {
+      crosshair: '<path d="M12 2v7m0 6v7M2 12h7m6 0h7"/>',
+      wand: '<path d="m4 20 11-11m-2-2 4 4m1-9v4m-4-2h4m-1 5 2 2m-8-9-2 2"/>',
+      eyedropper: '<path d="m12 9-8.4 8.4A2 2 0 0 0 3 18.8v1.4a2 2 0 0 0-.6 1.4 2 2 0 0 0 1.4.6h1.4a2 2 0 0 0 1.4-.6L15 12m3-3 .4.4a1 1 0 1 1-3 3l-3.8-3.8a1 1 0 1 1 3-3l.4.4 3.4-3.4a1 1 0 1 1 3 3zM2 22l.4-.4"/>',
+    };
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${ink}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${paths[kind] || paths.crosshair}</svg>`;
+    const hotspot = kind === "crosshair" ? "12 12" : kind === "wand" ? "4 20" : "2 22";
+    return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${hotspot}, crosshair`;
+  };
+  const showAdaptiveCursor = (event) => {
+    if (!app.doc || !hoverAt) return;
+    const navigating = spacing || zoomHeld(event) || moveLent(event) || (gesture && (gesture.kind === "pan" || gesture.kind === "zoom"));
+    if (navigating) {
+      ui.stage.style.cursor = "";
+      return;
+    }
+    if (gesture || wandSetAside(event) || ui.stage.classList.contains("is-over-selection")) return;
+    const sampling = isSampling(event);
+    if (!sampling && !ADAPTIVE_CURSOR_TOOLS.has(app.tool)) return;
+    const [x, y] = toDoc(hoverAt).map(Math.floor);
+    if (x < 0 || y < 0 || x >= docCanvas.width || y >= docCanvas.height) return;
+    // The page is already composed here: reading one pixel must not repaint every layer on
+    // every pointermove just to choose the cursor's ink.
+    const pixel = docCanvas.getContext("2d").getImageData(x, y, 1, 1).data;
+    if (pixel[3]) ui.stage.style.cursor = adaptiveCursor(sampling ? "eyedropper" : app.tool === "wand" ? "wand" : "crosshair", { r: pixel[0], g: pixel[1], b: pixel[2] });
+  };
   const showWandSetAside = (event) => {
     // A key has no position: it goes by where the pointer last was
     if (event.clientX !== undefined) hoverAt = event;
@@ -6332,10 +6421,15 @@
     const cloning = !gesture && (app.tool === "stamp" || app.tool === "healing") && event.altKey && !event.ctrlKey && !event.metaKey && !spacing;
     ui.stage.classList.toggle("is-cloning", cloning);
     if (cloning) hideStampPreview();
+    showAdaptiveCursor(event);
   };
   const pickAt = ([x, y], background) => {
     const color = ops.pickColor(x, y);
     if (!color) return;
+    if (sampleColorForPicker) {
+      sampleColorForPicker(color);
+      return;
+    }
     // The Gradient tool's Alt + click, its Gradient Editor open: the colour chosen there takes it
     if (!background && app.tool === "gradient" && window.TypeRRetouch && window.TypeRRetouch.sampled(color)) return;
     if (background) app.bg = color;
@@ -7531,6 +7625,11 @@
     openContextMenu(event.clientX, event.clientY, ["Deselect", "Reselect", "Inverse", null, "Cut", "Copy", "Fill with Foreground Colour", "Fill with Background Colour", "Content-Aware Fill…", "Generative Fill…", null, addMaskItem, addVectorMaskItem, "Create Clipping Mask", null, "Free Transform", null, "Blending Options…", null, "Duplicate Layer", "Group Layers", "Copy Layer", "Paste Layer", "Copy Layer Style", "Paste Layer Style", null, "Convert to Paragraph Text", "Convert to Point Text", "Rasterize Type", null, "Convert to SFX", "Separate SFX Letters", "Keep in the bank…", null, "Merge Down", "Merge Visible"]);
   });
   ui.stage.addEventListener("dblclick", (event) => {
+    if (app.tool === "gradient" && window.TypeRRetouch && window.TypeRRetouch.doubleClick(event)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
     const turning = transformOf();
     if (turning) {
       // This double-click is the transform's: the text under it doesn't open as well
@@ -16625,7 +16724,7 @@
   const isText = (element) => isField(element) && element.tagName !== "SELECT" && !/^(checkbox|radio|color|range)$/.test(element.type);
 
   // TypeR's panel has nothing to do while a window is open or text is being typed in the page
-  PS.muteKeys(() => ui.modal.open || Boolean(ui.layerStyle) || isText(document.activeElement));
+  PS.muteKeys(() => modalBlocksPage() || Boolean(ui.layerStyle) || isText(document.activeElement));
 
   // A choice made with the mouse gives the keyboard back, in the page and in the panel
   const watchChoices = (root) => {
@@ -16719,7 +16818,7 @@
 
   const handleKey = (event, fromPanel) => {
     // Layer Style's own window keeps its keys: an Undo there would undo what it tries out
-    if (ui.modal.open || ui.layerStyle) return;
+    if (modalBlocksPage() || ui.layerStyle) return;
     const active = fromPanel ? event.target : document.activeElement;
     const command = isCommand(event);
     // A menu or a checkbox only keeps the plain keys, which it uses itself
@@ -17734,6 +17833,7 @@
     view,
     viewChanged,
     openDialog,
+    openColorPicker,
     openFiles,
     setPages,
     openChapter,
