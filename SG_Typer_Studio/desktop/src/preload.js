@@ -8,7 +8,7 @@ const { contextBridge, ipcRenderer, webFrame } = require("electron");
 // Sandboxed preloads may require Electron and their own local modules, but not package.json.
 // Keep the fixed provider here: requiring the package used to abort the whole bridge, including
 // Actions, before contextBridge.exposeInMainWorld could run.
-const releasesUrl = "https://github.com/Karpenator/Syndicate_Typer_Studio/releases";
+const releasesUrl = "https://github.com/Karpenator/SG-Typer-Studio/releases";
 
 webFrame.setVisualZoomLevelLimits(1, 1);
 
