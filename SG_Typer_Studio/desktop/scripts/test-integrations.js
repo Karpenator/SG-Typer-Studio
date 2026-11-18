@@ -338,3 +338,91 @@ test("a new selection starts with the full Generative Fill prompt and controls",
   assert.ok(source.includes('iconButton("settings", T("Generative Fill settings")'));
   assert.ok(source.includes('const setTaskBar = (on) =>'));
 });
+
+test("Generate goes to the model again when a plain, white area is selected after a generation", async () => {
+  // The text detection's areas tell which parts of a selection lie on a plain background: white,
+  // here, as a page is left after a generation over white.
+  const maskWindow = { addEventListener() {}, removeEventListener() {}, localStorage: { getItem: () => null, setItem() {} } };
+  vm.runInNewContext(read("web/textmask.js"), { window: maskWindow, document: { addEventListener() {}, visibilityState: "visible" }, console, setTimeout, clearTimeout, fetch: async () => { throw new Error("offline"); }, URL, CustomEvent: function () {} });
+  const Mask = maskWindow.TypeRTextMask;
+  const width = 40;
+  const height = 20;
+  const page = new Uint8ClampedArray(width * height * 4).fill(255);
+  const maskOf = (blocks) => {
+    const mask = new Uint8Array(width * height);
+    blocks.forEach(([x0, y0, x1, y1]) => {
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) mask[y * width + x] = 1;
+    });
+    return mask;
+  };
+  const one = maskOf([[20, 7, 26, 13]]);
+  assert.equal(Mask.areasOf(one, page, width, height, 6, 2).filter((area) => area.plain).length, 1, "a white area counts as plain: Generate must not paint it over");
+
+  // The editor's own Generate, as it stands, run on that page with the services stubbed
+  const source = read("web/app.js");
+  const from = source.indexOf("  const generationTargets = ");
+  const start = from > 0 ? from : source.indexOf("  const runGenerative = ");
+  const end = source.indexOf("  // Parts of a selection on a plain background");
+  assert.ok(start > 0 && end > start, "Generate must stay testable on its own");
+  const fills = [];
+  const started = [];
+  let mask = one;
+  const selection = { source: "rectangle", bounds: { left: 20, top: 7, right: 25, bottom: 12 } };
+  const doc = { width, height, state: { selection, quickMask: false, activeIds: [] } };
+  const context = {
+    Gen: {
+      load: () => ({ service: "google", keys: { google: "key" }, models: { google: "gemini-3.1-flash-image" }, custom: {} }),
+      ready: () => true,
+      takesPrompt: () => true,
+      modelOf: (account) => account.models.google,
+      priceOf: () => ({ usd: 0.07, free: false }),
+    },
+    Mask,
+    app: { doc },
+    textLink: () => 6,
+    gen: { open: true, prompt: "" },
+    pixelsOnly: () => false,
+    agreeToDownload: async () => true,
+    ops: {
+      selectionFullMask: () => mask,
+      maskSelection: (data, w, h, left, top, source2) => ({ source: source2, mask: data, bounds: { left, top, right: left + w - 1, bottom: top + h - 1 } }),
+      deselect: () => {},
+    },
+    // The plain fill at once: Remove Text's and the Bubble Cleaner's, never Generate's
+    fillPlainAreas: (target, areas, name) => fills.push({ name, count: areas.length }),
+    startJobs: () => started.push("start"),
+    renderGenTray: () => {},
+    schedule: () => {},
+    dialog: async () => true,
+    fill: (text) => text,
+    T: (text) => text,
+    money: (usd) => `$${usd}`,
+    modelName: () => "Nano Banana 2",
+    serviceName: () => "Google",
+    AbortController,
+    console,
+  };
+  // The editor's own generation list, in the sandbox as it is in its scope
+  const preamble = "let genJobs = []; let genJobCount = 0; let genTrayOpen = true;\n";
+  const generate = vm.runInNewContext(`${preamble}${source.slice(start, end)}; ({ runGenerative, jobs: () => genJobs });`, context);
+  assert.equal(typeof generate.runGenerative, "function");
+  await generate.runGenerative();
+  assert.equal(fills.length, 0, "Fill with the background at once is never Generate's: a white area would turn into a white TypeR Clean");
+  assert.equal(generate.jobs().length, 1, "the model gets the white area, as it got it the first time");
+  assert.equal(generate.jobs()[0].prompt, "");
+  assert.equal(generate.jobs()[0].selection, selection, "one plain area is asked as it was drawn");
+  assert.deepEqual(started, ["start"], "the generation starts at once");
+
+  // Two places apart: one generation each, still nothing painted over
+  mask = maskOf([[0, 0, 6, 6], [20, 7, 26, 13]]);
+  generate.jobs().length = 0;
+  started.length = 0;
+  await generate.runGenerative();
+  assert.equal(fills.length, 0);
+  assert.equal(generate.jobs().length, 2, "each place apart goes to the model");
+  assert.ok(generate.jobs().every((job) => job.selection.source === "mask"));
+
+  assert.ok(!source.includes("const areas = described ?"), "Generate must not classify the selection as plain backgrounds");
+  assert.ok(!source.includes('fillPlainAreas(doc, plain, "Generative Fill")'), "Generate must never paint the selection on TypeR Clean");
+  assert.ok(source.includes('if (plain.length) fillPlainAreas(doc, plain, "Remove Text");'), "Remove Text keeps filling plain backgrounds at once");
+});

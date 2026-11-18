@@ -4803,6 +4803,17 @@
     schedule(false);
     return true;
   };
+  // The parts of the selection that each get their own generation, one place at a time; the
+  // selection itself when it is one piece. Nothing here is painted over: Generate is always the
+  // model's, white or plain background or not. The fill at once belongs to Remove Text and the
+  // Bubble Cleaner, so a selection picked again after a generation still goes to the model.
+  const generationTargets = (doc, selection) => {
+    if (!Mask) return [selection];
+    const full = ops.selectionFullMask(selection);
+    const areas = Mask.split(full, doc.width, doc.height, textLink(doc));
+    // A single part keeps the selection as it was drawn
+    return areas.length > 1 ? areas.map((area) => ops.maskSelection(area.data, area.width, area.height, area.left, area.top, "mask")) : [selection];
+  };
   const runGenerative = async () => {
     if (!Gen || pixelsOnly()) return;
     const doc = app.doc;
@@ -4810,26 +4821,8 @@
     if (!selection || doc.state.quickMask) return;
     let account = Gen.load();
     // Each separate part of the selection gets its own generation, on its own layer, as Remove
-    // Text does: the model sees one place at a time. Nothing to describe: the parts on a plain
-    // background are filled with that colour at once, as the Bubble Cleaner does, and only the
-    // rest goes to the model.
-    let plain = [];
-    let targets = [selection];
-    if (Mask) {
-      const described = Gen.takesPrompt(account) && gen.prompt.trim();
-      const full = ops.selectionFullMask(selection);
-      const areas = described ? Mask.split(full, doc.width, doc.height, textLink(doc)) : selectionAreas(doc, full, ops.reshapePage());
-      plain = areas.filter((area) => area.plain);
-      const art = areas.filter((area) => !area.plain);
-      if (plain.length && !art.length) {
-        fillPlainAreas(doc, plain, "Generative Fill");
-        ops.deselect();
-        schedule(false);
-        return;
-      }
-      // A single part keeps the selection as it was drawn
-      if (art.length > 1 || plain.length) targets = art.map((area) => ops.maskSelection(area.data, area.width, area.height, area.left, area.top, "mask"));
-    }
+    // Text does: the model sees one place at a time.
+    const targets = generationTargets(doc, selection);
     if (!Gen.ready(account)) {
       account = await generativeSettings();
       if (!account || !Gen.ready(account) || app.doc !== doc || doc.state.selection !== selection) return;
@@ -4844,10 +4837,6 @@
         ok: T("Generate"),
       });
       if (!answer || app.doc !== doc || doc.state.selection !== selection) return;
-    }
-    if (plain.length) {
-      fillPlainAreas(doc, plain, "Generative Fill");
-      ops.deselect();
     }
     const activeIds = doc.state.activeIds.slice();
     const prompt = Gen.takesPrompt(account) ? gen.prompt.trim() : "";
