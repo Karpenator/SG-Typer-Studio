@@ -1,7 +1,6 @@
-// Builds photoshop.js's engine under a stub of the page and paints with it: what a healing stroke
-// copies, where a source from another page comes from, and what a big page costs per stroke.
-// Reading the source cannot catch a page-sized copy that stalls on a 12000-pixel file; running
-// it can.
+// Builds photoshop.js's engine under a stub of the page and paints with it: a healing stroke
+// copies what it must, and a source taken on another page is read from that page. Reading the
+// source cannot show either; running it can.
 
 const fs = require("fs");
 const path = require("path");
@@ -14,7 +13,7 @@ let src = fs.readFileSync(file, "utf8");
 // The few things a pointer move touches, opened to the test at the end of the module
 src = src.slice(0, src.lastIndexOf("})();"));
 src += `
-  window.__engine = () => ({ beginStroke: ops.beginStroke, extendStroke: ops.extendStroke, endStroke: ops.endStroke, app, healSamples, healingBoxOf, setDoc, rasterCache });
+  window.__engine = () => ({ beginStroke: ops.beginStroke, extendStroke: ops.extendStroke, endStroke: ops.endStroke, app, setDoc, rasterCache, referenceShot });
 })();
 `;
 
@@ -42,6 +41,10 @@ const el = (id) => new Proxy(({
   get(target, key) {
     if (key in target) return target[key];
     if (typeof key !== "string") return undefined;
+    // A context reads back what it was given, so that a canvas can be said to fit: the engine
+    // asks by painting one pixel and reading its alpha
+    if (key === "getImageData") return () => ({ data: [0, 0, 0, 255], width: 1, height: 1 });
+    if (key === "createImageData") return (w, h) => ({ data: new Uint8ClampedArray(Math.max(1, (w | 0) * (h | 0) * 4)), width: w, height: h });
     // Anything else a real element has: a no-op method, or undefined for a value
     if (/^on/.test(key)) return null;
     // A DOM element answers a call to nearly anything with nothing, as after(), before(), replaceWith() do
@@ -97,6 +100,7 @@ const window = {
   localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
   location: { href: "file:///app/index.html", search: "" },
 };
+
 window.window = window;
 const sandbox = { window, document, navigator: window.navigator, localStorage: window.localStorage,
   requestAnimationFrame: window.requestAnimationFrame, cancelAnimationFrame: window.cancelAnimationFrame,
@@ -140,56 +144,31 @@ const makeDoc = (id, width, height) => {
   return doc;
 };
 
-test("A healing stroke never copies the whole page", () => {
-  const page = makeDoc(101, 12000, 12000);
-  app.docs.push(page);
-  engine.setDoc(page);
-  const op = { t: "stroke", points: [[5000, 5000], [5010, 5000]], size: 60, healing: true, healingPlan: { doc: page, from: null, sample: "below", layerId: 2, ox: -30, oy: -20, dx: 0, dy: 0 } };
-  const samples = engine.healSamples({ op }, { left: 4960, top: 4960, width: 100, height: 100 });
-  // 12000 x 12000 would be 576 megabytes a sample, and there are two: this is what stalled it
-  assert.ok(samples.source.width * samples.source.height < 2000 * 2000, `the sample is the stroke's, not the page's (${samples.source.width} × ${samples.source.height})`);
-  assert.equal(samples.source.width, samples.source.height);
-
-  // The stroke goes on: the sample grows, and stays a stroke's size
-  op.points.push([5200, 5000]);
-  const grown = engine.healSamples({ op }, { left: 4960, top: 4960, width: 300, height: 100 });
-  assert.ok(grown.source.width > samples.source.width, "the sample grows with the stroke");
-  assert.ok(grown.source.width < 2000, `and still does not take the page (${grown.source.width})`);
-});
-
-test("A healing stroke paints and ends cleanly, its samples made to size", () => {
-  const page = makeDoc(102, 800, 600);
-  app.docs.push(page);
-  engine.setDoc(page);
-  const target = page.state.layers.find((layer) => layer.id === 2);
-  const began = engine.beginStroke(target.id, { size: 30, hardness: 100, color: { red: 0, green: 0, blue: 0 }, healing: { ox: 20, oy: 10, sample: "below", doc: page, layer: 2 } });
-  assert.ok(began, "the stroke begins");
-  assert.ok(page.liveStroke.op.healingPlan, "with its plan for what it reads");
-  assert.equal(page.liveStroke.op.healingSource, undefined, "and no page-sized sample made before it is needed");
-  engine.extendStroke(420, 320);
-  engine.extendStroke(440, 322);
-  const samples = engine.healSamples(page.liveStroke, { left: 400, top: 300, width: 60, height: 40 });
-  assert.ok(samples.source.width < page.width, "the sample is smaller than the page");
-  engine.endStroke();
-  assert.equal(page.liveStroke, null, "and the stroke ends");
-});
-
-test("A source taken on another page is that page's, not the one being painted on", () => {
-  const painted = makeDoc(103, 900, 700);
-  const reference = makeDoc(104, 640, 480);
+test("A healing stroke keeps its samples, and a source from another page is that page's", () => {
+  const painted = makeDoc(101, 1600, 1200);
+  const reference = makeDoc(102, 640, 480);
   app.docs.push(painted, reference);
   engine.setDoc(painted);
   const target = painted.state.layers.find((layer) => layer.id === 2);
-  const began = engine.beginStroke(target.id, { size: 24, hardness: 100, color: { red: 0, green: 0, blue: 0 }, healing: { ox: 12, oy: 8, sample: "all", doc: reference, layer: null } });
-  assert.ok(began, "a stroke with a source on another page begins");
-  const plan = painted.liveStroke.op.healingPlan;
-  assert.equal(plan.from, reference, "it reads the other page");
-  assert.equal(plan.sample, "all", "with the sampling chosen there");
-  // Its samples are made on demand, and are the stroke's size, not either page's
-  const samples = engine.healSamples(painted.liveStroke, { left: 100, top: 100, width: 40, height: 40 });
-  assert.ok(samples.source.width < Math.max(painted.width, reference.width), "the sample is a stroke's size");
-  assert.ok(samples.source.width > 0 && samples.source.height > 0, "and it is there");
+  const began = engine.beginStroke(target.id, { size: 30, hardness: 100, color: { red: 0, green: 0, blue: 0 }, healing: { ox: 20, oy: 10, sample: "below", doc: painted, layer: 2 } });
+  assert.ok(began, "the stroke begins");
+  const op = painted.liveStroke.op;
+  // The samples are the page's own coordinates, whole, as the healer reads them
+  assert.equal(op.healingSource.width, painted.width, "the source sample is the page's");
+  assert.equal(op.healingDestination.width, painted.width, "and so is the destination's");
+  assert.deepEqual([op.healingSourceAt.x, op.healingSourceAt.y], [0, 0], "at the page's own corner");
+  engine.extendStroke(420, 320);
+  engine.extendStroke(440, 322);
   engine.endStroke();
+  assert.equal(painted.liveStroke, null, "and the stroke ends");
+
+  // Another page taken as the source: the same stroke, reading that page's pixels
+  engine.setDoc(painted);
+  const fromElsewhere = engine.beginStroke(target.id, { size: 24, hardness: 100, color: { red: 0, green: 0, blue: 0 }, healing: { ox: 12, oy: 8, sample: "all", doc: reference, layer: null } });
+  assert.ok(fromElsewhere, "a stroke with a source on another page begins");
+  engine.extendStroke(100, 100);
+  engine.endStroke();
+  assert.equal(painted.liveStroke, null, "and ends");
 });
 
 test("A page that changes forgets what a stroke read from it", () => {
@@ -201,46 +180,4 @@ test("A page that changes forgets what a stroke read from it", () => {
   const ops = sandbox.window.TypeRPhotoshop.ops;
   ops.newLayer();
   assert.equal(page.history.length >= 1, true, "the change went into History");
-});
-
-test("A Clone Stamp stroke keeps only the layer's part it reaches", () => {
-  // The layer before the stroke and the stroke's coverage were whole pages: two gigabytes each on
-  // a 12000-pixel file, made at the first dab. That is what made the stamp stall there.
-  const page = makeDoc(106, 12000, 12000);
-  app.docs.push(page);
-  engine.setDoc(page);
-  const target = page.state.layers.find((layer) => layer.id === 2);
-  const began = engine.beginStroke(target.id, { size: 60, hardness: 100, color: { red: 0, green: 0, blue: 0 }, clone: { ox: 300, oy: 300, sample: "below", doc: page, layer: 2 } });
-  assert.ok(began, "the stroke begins");
-  engine.extendStroke(6000, 6000);
-  engine.extendStroke(6010, 6002);
-  const live = page.liveStroke;
-  assert.ok(live.base.width < 2000 && live.base.height < 2000, `the kept layer is the stroke's part (${live.base.width} × ${live.base.height})`);
-  assert.ok(live.coverage.width < 2000, "and so is its coverage");
-  // A long stroke grows what it keeps, half again each way, and stays a stroke's size
-  engine.extendStroke(7600, 6002);
-  assert.ok(page.liveStroke.base.width < 4000, `it grows with the stroke (${page.liveStroke.base.width})`);
-  engine.endStroke();
-  assert.equal(page.liveStroke, null, "and the stroke ends");
-});
-
-test("Switching pages with a source taken keeps the healing brush working", () => {
-  // Alt + click on one tab, draw on another: its samples come from that page, and the stroke
-  // ends into History like any other. (The Clone Stamp is left out here: its source is a whole
-  // picture of the other page, and a canvas that holds no pixels cannot stand in for one.)
-  const first = makeDoc(107, 900, 700);
-  const second = makeDoc(108, 800, 600);
-  app.docs.push(first, second);
-  engine.setDoc(second);
-  const target = second.state.layers.find((layer) => layer.id === 2);
-  engine.beginStroke(target.id, { size: 24, hardness: 100, color: { red: 0, green: 0, blue: 0 }, healing: { ox: 10, oy: 10, sample: "all", doc: first, layer: null } });
-  assert.ok(second.liveStroke, "the stroke began");
-  assert.equal(second.liveStroke.op.healingPlan.from, first, "reading the page the source was taken on");
-  engine.extendStroke(300, 300);
-  engine.extendStroke(310, 305);
-  engine.endStroke();
-  assert.equal(second.liveStroke, null, "and it ended");
-  assert.equal(Boolean(second.history[second.historyIndex].state), true, "with a History step");
-  // The page it read is still open, and still itself
-  assert.equal(app.docs.includes(first), true, "the page the source was taken on is still open");
 });

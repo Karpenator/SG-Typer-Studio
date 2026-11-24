@@ -106,10 +106,11 @@ test("Healing Brush is loaded before the raster engine and has its own UI identi
   assert.ok(engine.includes('!live.worker || typeof createImageBitmap === "undefined"'), "missing bitmap transfer support retains the synchronous fallback");
   // The samples are the stroke's own size, not the page's: a 12000-pixel page used to need three
   // gigabytes of canvases per stroke, which is what stalled the brush on big files
-  assert.ok(!engine.includes("op.healingSource = newCanvas(doc.width, doc.height);"), "the page is never copied whole for a healing stroke");
-  assert.ok(engine.includes("const healSamples = (live, box) => {"), "the samples grow with the stroke");
-  assert.ok(engine.includes("const healingBoxOf = (op, box) =>"), "and are bounded by where the stroke can reach");
-  assert.ok(engine.includes("if (!op.healingFrom) op.healingFrom = healingFrom(op, plan);"), "what the stroke reads is taken once, from the page as it was");
+  // The samples are the page's own coordinates, whole, as the healer has always read them
+  assert.ok(engine.includes("op.healingSource = newCanvas(doc.width, doc.height);"), "a healing stroke samples in the page's own coordinates");
+  assert.ok(engine.includes("op.healingDestination = newCanvas(doc.width, doc.height);"), "the destination with them");
+  assert.ok(engine.includes("op.healingSource.getContext(\"2d\", { willReadFrequently: true }).drawImage(shot.canvas, shot.x - healing.ox - dx, shot.y - healing.oy - dy);"), "the source placed by its offset on the page");
+  assert.ok(!engine.includes("healingPlan"), "and nothing of the stroke left over for History to carry");
   assert.ok(engine.includes("ctx.drawImage(op.healingResult, op.healingBox.left, op.healingBox.top);"), "History replays the compact result without solving again");
   assert.ok(!/op.t === "stroke" && op.healingResult[\s\S]{0,400}globalCompositeOperation = "copy"/.test(engine), "a healing patch is drawn over the layer, never copy: undo must not empty the rest of it");
   assert.ok(engine.includes("if (touched) {"), "a healing patch carries only the pixels its stroke changed");

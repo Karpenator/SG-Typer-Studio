@@ -839,26 +839,20 @@
     viewChanged();
   };
 
-  // The picture on screen is drawn at the size it shows: small pages stay sharp.
-  // `dirty` is the part of the page that changed, in the page's own pixels. Only that part is
-  // drawn again: a stroke on a 12000-pixel page touches a brush's worth of it, and scaling the
-  // whole page down to the screen sixty times a second is what made the brushes lag there.
-  const blit = (dirty) => {
+  // The picture on screen is drawn at the size it shows: small pages stay sharp
+  const blit = () => {
     const ratio = dpr();
     const w = Math.round(stageW * ratio);
     const h = Math.round(stageH * ratio);
     if (ui.canvas.width !== w || ui.canvas.height !== h) {
       ui.canvas.width = w;
       ui.canvas.height = h;
-      dirty = null;
     }
     const ctx = ui.canvas.getContext("2d");
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, stageW, stageH);
     const doc = app.doc;
-    if (!doc) {
-      ctx.clearRect(0, 0, stageW, stageH);
-      return;
-    }
+    if (!doc) return;
     const v = doc.view;
     const x = Math.round(v.x);
     const y = Math.round(v.y);
@@ -875,42 +869,12 @@
       c.fillRect(8, 8, 8, 8);
       checker = ctx.createPattern(tile, "repeat");
     }
+    ctx.fillStyle = checker;
+    ctx.fillRect(x, y, dw, dh);
     ctx.imageSmoothingEnabled = v.zoom < 2;
     // While something moves, speed: the sharp picture comes when it stops
     ctx.imageSmoothingQuality = pinch || gesture || performance.now() < quickUntil ? "low" : "high";
-    // The part of the page on screen, and the part of it that changed, in the page's pixels
-    const shownLeft = Math.max(0, -v.x / v.zoom);
-    const shownTop = Math.max(0, -v.y / v.zoom);
-    const shownRight = Math.min(doc.width, (stageW - v.x) / v.zoom);
-    const shownBottom = Math.min(doc.height, (stageH - v.y) / v.zoom);
-    let area = null;
-    if (dirty && dirty.right > shownLeft && dirty.left < shownRight && dirty.bottom > shownTop && dirty.top < shownBottom) {
-      // Two pixels of slack each way: an edge drawn just outside the box still shows whole
-      area = {
-        left: Math.max(shownLeft, dirty.left - 2),
-        top: Math.max(shownTop, dirty.top - 2),
-        right: Math.min(shownRight, dirty.right + 2),
-        bottom: Math.min(shownBottom, dirty.bottom + 2),
-      };
-    }
-    if (!area) {
-      ctx.clearRect(0, 0, stageW, stageH);
-      area = { left: shownLeft, top: shownTop, right: shownRight, bottom: shownBottom };
-    }
-    const sx = Math.max(0, area.left);
-    const sy = Math.max(0, area.top);
-    const sw = Math.min(doc.width, area.right) - sx;
-    const sh = Math.min(doc.height, area.bottom) - sy;
-    if (sw <= 0 || sh <= 0) return;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(sx * v.zoom + x, sy * v.zoom + y, sw * v.zoom, sh * v.zoom);
-    ctx.clip();
-    ctx.fillStyle = checker;
-    ctx.fillRect(x, y, dw, dh);
-    ctx.drawImage(docCanvas, sx, sy, sw, sh, sx * v.zoom + x, sy * v.zoom + y, sw * v.zoom, sh * v.zoom);
-    ctx.restore();
-    // The page's edge, always over what was just drawn: a stroke can reach it
+    ctx.drawImage(docCanvas, x, y, dw, dh);
     ctx.strokeStyle = "#111";
     ctx.lineWidth = 1;
     ctx.strokeRect(x - 0.5, y - 0.5, dw + 1, dh + 1);
@@ -927,22 +891,14 @@
   const paintNow = () => {
     paintRequest = 0;
     const doc = app.doc;
-    // The part of the page that changed in this frame: the screen draws only that part
-    let dirty = null;
     if (doc && needCompose) {
       if (docCanvas.width !== doc.width || docCanvas.height !== doc.height) {
         docCanvas.width = doc.width;
         docCanvas.height = doc.height;
         composeAll = true;
       }
-      if (composeAll || composedDoc !== doc || !composeRect) {
-        PS.paintDoc(doc, docCanvas.getContext("2d"), { screen: true });
-        composeAll = true;
-        dirty = null;
-      } else if (composeRect.right > composeRect.left && composeRect.bottom > composeRect.top) {
-        dirty = composeRect;
-        PS.paintDoc(doc, docCanvas.getContext("2d"), { rect: composeRect, screen: true });
-      }
+      if (composeAll || composedDoc !== doc || !composeRect) PS.paintDoc(doc, docCanvas.getContext("2d"), { screen: true });
+      else if (composeRect.right > composeRect.left && composeRect.bottom > composeRect.top) PS.paintDoc(doc, docCanvas.getContext("2d"), { rect: composeRect, screen: true });
       composedDoc = doc;
     }
     needCompose = false;
@@ -954,7 +910,7 @@
       docCanvas.width = 1;
       docCanvas.height = 1;
     }
-    blit(dirty);
+    blit();
     drawOverlay();
     placeTaskBar();
     placeReview();
@@ -989,7 +945,6 @@
 
   let navigatorGeometry = null;
   let navigatorPan = null;
-  let navigatorPicture = "";
   const renderNavigator = () => {
     const doc = app.doc;
     const preview = ui.navigatorPreview;
@@ -1019,18 +974,12 @@
       ui.navigatorCanvas.width = pixelW;
       ui.navigatorCanvas.height = pixelH;
     }
-    // The page's picture is redrawn only when it changed: a scroll moves the frame alone, and
-    // the frame's own box is redrawn every time
-    const pictureKey = `${doc.id}:${doc.liveStroke ? doc.historyIndex : doc.state}`;
-    if (navigatorPicture !== pictureKey) {
-      navigatorPicture = pictureKey;
-      const ctx = ui.navigatorCanvas.getContext("2d");
-      ctx.setTransform(pixelW / shownW, 0, 0, pixelH / shownH, 0, 0);
-      ctx.clearRect(0, 0, shownW, shownH);
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(docCanvas, 0, 0, shownW, shownH);
-    }
+    const ctx = ui.navigatorCanvas.getContext("2d");
+    ctx.setTransform(pixelW / shownW, 0, 0, pixelH / shownH, 0, 0);
+    ctx.clearRect(0, 0, shownW, shownH);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(docCanvas, 0, 0, shownW, shownH);
     const v = doc.view;
     const x0 = Math.max(0, -v.x / v.zoom);
     const y0 = Math.max(0, -v.y / v.zoom);
@@ -9491,10 +9440,7 @@
       const shownName = ui.layers.querySelector(`#layer-row-${typed.id} .layer__name`);
       if (shownName && !shownName.firstElementChild && shownName.textContent !== typed.name) shownName.textContent = typed.name;
     }
-    // A stroke makes a new History step but leaves the list as it was: its thumbnails are the
-    // layer's picture whole, not the brush's last dab, so the list is not rebuilt per stroke
-    const thumbKey = doc.liveStroke ? Math.floor(doc.historyIndex / 8) : doc.historyIndex;
-    const key = JSON.stringify([doc.id, doc.state.activeIds, thumbKey, doc.state.layers.map((layer) => [layer.id, layer.visible, typed === layer ? "" : layer.name, layer.locked, layer.open, (layer.paint || []).length, Boolean(layer.clipping), layer.color || "", layer.locks || 0, PS.fillOf(layer), layer.link || 0, hasFx(layer) ? [layer.stroke || 0, layer.kind === "text" ? layer.effects || 0 : 0, fxOpen.has(layer.id)] : 0]), Fonts.generation, target ? [target.id, target.part] : null, doc.maskView ? doc.maskView.mode : null, thumbPixels(), layerFind.open, layerFind.words, Array.from(layerFind.kinds)]);
+    const key = JSON.stringify([doc.id, doc.state.activeIds, doc.historyIndex, doc.state.layers.map((layer) => [layer.id, layer.visible, typed === layer ? "" : layer.name, layer.locked, layer.open, (layer.paint || []).length, Boolean(layer.clipping), layer.color || "", layer.locks || 0, PS.fillOf(layer), layer.link || 0, hasFx(layer) ? [layer.stroke || 0, layer.kind === "text" ? layer.effects || 0 : 0, fxOpen.has(layer.id)] : 0]), Fonts.generation, target ? [target.id, target.part] : null, doc.maskView ? doc.maskView.mode : null, thumbPixels(), layerFind.open, layerFind.words, Array.from(layerFind.kinds)]);
     if (key === layersKey) return;
     layersKey = key;
     const byId = new Map(doc.state.layers.map((layer) => [layer.id, layer]));
