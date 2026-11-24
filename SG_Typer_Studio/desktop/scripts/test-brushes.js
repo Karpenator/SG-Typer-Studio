@@ -148,3 +148,48 @@ test("A brush's pointer is hidden only by the ring that is drawn in its place", 
   // A hidden ring leaves a visible pointer: place and hide stay together
   assert.ok(/const hideBrushRing[\s\S]{0,220}?remove\("is-ring"\)/.test(app), "hiding the ring puts the pointer back");
 });
+
+test("The Clone Stamp and the Healing Brush can take their source from another open page", () => {
+  const app = read("web/app.js");
+  // The source carries the page it was taken on, so a stroke can read pixels from another tab
+  assert.ok(app.includes("const stampFields = (state) => ({ ox: state.offset ? state.offset[0] : 0, oy: state.offset ? state.offset[1] : 0, sample: state.sample, doc: state.doc || app.doc, layer: state.layer || null });"), "the source says which page and layer it came from");
+  assert.ok(app.includes("const sourceIsElsewhere = () => hasStampSource() && stampState().doc !== app.doc;"), "a source on another page is known as one");
+  assert.ok(app.includes("app.docs.includes(stampState().doc)"), "and only while that page is still open");
+  // The options bar says where it is, and lets it go in one click
+  assert.ok(app.includes('where.textContent = elsewhere ? fill(T("Source: {page}"), { page: state.doc.name }) : T("Source: this page");'), "the bar says which page the source is on");
+  assert.ok(app.includes('back.textContent = T("Use this page");'), "and one click takes it from this page again");
+  // A source on another page is that page's pixels: the preview under the brush shows them, cut
+  // from that page as it stands in its own tab
+  assert.ok(app.includes("const elsewhere = sourceIsElsewhere();"), "the preview knows a source from another page");
+  assert.ok(app.includes("ctx.drawImage(referencePicture(), sx - (size * other.zoom) / 2, sy - (size * other.zoom) / 2, size * other.zoom, size * other.zoom, 0, 0, side, side);"), "and draws that page there");
+  assert.ok(app.includes("const referencePicture = () => {"), "through the picture the engine keeps of it");
+  // Taken on this page, the source is still this page as it was when the stroke started
+  const engine = read("web/photoshop.js");
+  assert.ok(engine.includes("const shotOf = (fields) => {"), "a stroke asks for the page it reads");
+  assert.ok(engine.includes("if (fields.doc && fields.doc !== doc) {"), "and reads the other page when the source was taken there");
+  assert.ok(engine.includes("return referenceShot(fields.doc, fields.sample, other);"), "from a picture kept for that page");
+});
+
+test("A source whose page was closed says so instead of painting nothing", () => {
+  const app = read("web/app.js");
+  // The page a source was taken on can go away: a stroke then says so rather than reaching for it
+  assert.ok(app.includes("const sourceGone = () => Boolean(stampState().doc) && !app.docs.includes(stampState().doc);"), "a closed page is known as gone");
+  assert.ok(app.includes('toast(T(tool === "healing" ? "The page the healing source was taken on is closed. Alt + click to choose another." : "The page the clone source was taken on is closed. Alt + click to choose another."));'), "and the click that finds it gone says so");
+  assert.ok(app.includes("Object.assign(state, { doc: null, layer: null, x: 0, y: 0, offset: null, pointer: null });"), "while the source itself is let go");
+});
+
+test("The source taken with Alt on one page stays when another tab is opened", () => {
+  // What a user does: pick the tool, Alt + click on the reference page, switch tabs, paint. The
+  // source must still name the page it came from, with the layer sampled there and the offset
+  // counted from the first click on the page being painted.
+  const app = read("web/app.js");
+  const engine = read("web/photoshop.js");
+  assert.ok(app.includes('const hasStampSource = () => Boolean(app.doc) && Boolean(stampState().doc) && app.docs.includes(stampState().doc);'), "the source counts while its page is open");
+  assert.ok(app.includes("const stampFields = (state) => ({ ox: state.offset ? state.offset[0] : 0, oy: state.offset ? state.offset[1] : 0, sample: state.sample, doc: state.doc || app.doc, layer: state.layer || null });"), "and every stroke says which page it reads");
+  // Switching a tab goes straight to the engine, which is what leaves the source alone
+  assert.ok(app.includes("const switchDoc = (doc) => {\n    if (!ui.editor.hidden) endEdit();\n    if (!settleTransform()) return;\n    PS.setActiveDoc(doc);\n  };"), "switching a tab only tells the engine which page is shown");
+  // On another page the layer chosen there decides what "Current Layer" and "Current and Below"
+  // read, as if its own Clone Stamp were used
+  assert.ok(engine.includes('const other = fields.layer ? fields.doc.state.layers.find((item) => item.id === fields.layer) : null;'), "the layer sampled is the one chosen on the source page");
+  assert.ok(engine.includes("const at = sample === \"below\" && layer ? doc.state.layers.indexOf(layer) : -1;"), "and Current and Below stops at it there");
+});

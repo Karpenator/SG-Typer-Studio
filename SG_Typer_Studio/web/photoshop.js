@@ -1296,37 +1296,174 @@
     c.drawImage(op.source.canvas, op.source.x, op.source.y);
     return shape;
   };
+  // The layer before the stroke, and the stroke's own coverage, kept to the part of the layer the
+  // stroke can reach rather than the whole layer: on a 12000-pixel page those two copies are two
+  // gigabytes per stroke, and making them is what made the Clone Stamp stall on big files.
+  const cloneBox = (box) => ({ left: box.left, top: box.top, right: box.left + box.width, bottom: box.top + box.height });
+  const prepareClone = (entry, live, box) => {
+    const { op } = live;
+    const span = cloneBox(box);
+    const left = Math.max(entry.cx0, span.left - op.size * 2);
+    const top = Math.max(entry.cy0, span.top - op.size * 2);
+    const right = Math.min(entry.cx1, span.right + op.size * 2);
+    const bottom = Math.min(entry.cy1, span.bottom + op.size * 2);
+    const before = live.baseAt;
+    const base = newCanvas(Math.max(1, right - left), Math.max(1, bottom - top));
+    const coverage = newCanvas(Math.max(1, right - left), Math.max(1, bottom - top));
+    // The layer as it is where the stroke has not reached: it has not painted there yet
+    base.getContext("2d").drawImage(entry.canvas, left - entry.cx0, top - entry.cy0, right - left, bottom - top, 0, 0, right - left, bottom - top);
+    if (before) {
+      // What the stroke has painted is inside what it kept: that part stays the layer before it
+      base.getContext("2d").drawImage(live.base, before.left - left, before.top - top);
+      coverage.getContext("2d").drawImage(live.coverage, before.left - left, before.top - top);
+    }
+    live.base = base;
+    live.coverage = coverage;
+    live.baseAt = { left, top, right, bottom };
+  };
+  const withinClone = (live, box) => {
+    const at = live.baseAt;
+    const span = cloneBox(box);
+    return at && span.left >= at.left && span.top >= at.top && span.right <= at.right && span.bottom <= at.bottom;
+  };
   // A stroke lays its source on the layer once. Segment by segment, each one over the last, a
   // half-transparent source would turn opaque: every segment starts again from the layer as it
   // was, with all the stroke so far.
   const cloneSegment = (entry, live, points) => {
     const { op } = live;
-    if (!live.base) {
-      live.base = newCanvas(entry.canvas.width, entry.canvas.height);
-      live.base.getContext("2d").drawImage(entry.canvas, 0, 0);
-      live.coverage = newCanvas(entry.canvas.width, entry.canvas.height);
-      const c = live.coverage.getContext("2d");
-      c.translate(-entry.cx0, -entry.cy0);
-      c.strokeStyle = "#000";
-    }
-    paintStroke(live.coverage.getContext("2d"), op, points);
+    // The copies hold the whole stroke so far, so that a stroke coming back over itself still
+    // finds what it covered; each segment paints only its own part of the layer
+    const whole = strokeBox(op.points, op.size);
+    if (!withinClone(live, whole)) prepareClone(entry, live, whole);
     const box = strokeBox(points, op.size);
-    const pixels = clonedPixels(op, box, (c) => c.drawImage(live.coverage, entry.cx0, entry.cy0));
+    // The coverage is laid down in the layer's own pixels: its crop is told where it sits there
+    const at = live.baseAt;
+    const coverage = live.coverage.getContext("2d");
+    coverage.setTransform(1, 0, 0, 1, -at.left, -at.top);
+    coverage.strokeStyle = "#000";
+    paintStroke(coverage, op, points);
+    coverage.setTransform(1, 0, 0, 1, 0, 0);
+    const pixels = clonedPixels(op, box, (c) => c.drawImage(live.coverage, at.left, at.top));
     entry.ctx.clearRect(box.left, box.top, box.width, box.height);
-    entry.ctx.drawImage(live.base, box.left - entry.cx0, box.top - entry.cy0, box.width, box.height, box.left, box.top, box.width, box.height);
+    entry.ctx.drawImage(live.base, box.left - at.left, box.top - at.top, box.width, box.height, box.left, box.top, box.width, box.height);
     entry.ctx.globalCompositeOperation = op.atop ? "source-atop" : "source-over";
     entry.ctx.drawImage(pixels, box.left, box.top);
     entry.ctx.globalCompositeOperation = "source-over";
   };
 
+  /* ---- what a healing stroke reads: the part of the page it can reach ---- */
+
+  // A healing stroke reads two pictures: where its pixels come from, and the page it heals.
+  // Both are made the size of the stroke, not of the page: on a 12000-pixel page a whole-page
+  // copy of each, per stroke, is three gigabytes of canvases, and laying them down is what made
+  // the brush stall on big files. They grow with the stroke, half again each way, so that a long
+  // stroke takes a new one a few times rather than per dab.
+  const HEALING_MARGIN = 2;
+  const healingBoxOf = (op, box) => ({
+    left: Math.floor(box.left - op.size - HEALING_MARGIN),
+    top: Math.floor(box.top - op.size - HEALING_MARGIN),
+    right: Math.ceil(box.left + box.width + op.size + HEALING_MARGIN),
+    bottom: Math.ceil(box.top + box.height + op.size + HEALING_MARGIN),
+  });
+  // What the stroke reads never changes once it is taken: another page as it looks, or this one
+  // as it was before the stroke, never what the stroke has just laid down
+  const healingFrom = (op, plan) => {
+    const doc = plan.doc;
+    if (plan.from) {
+      // Another page, its source placed by where the click was on it
+      const other = plan.sample === "current" && plan.layerId ? plan.from.state.layers.find((item) => item.id === plan.layerId) : null;
+      const shot = referenceShot(plan.from, plan.sample, other);
+      if (!shot) return null;
+      return {
+        source: shot.canvas,
+        destination: shot.canvas,
+        sourceX: shot.x - plan.ox - plan.dx,
+        sourceY: shot.y - plan.oy - plan.dy,
+        destinationX: shot.x - plan.dx,
+        destinationY: shot.y - plan.dy,
+      };
+    }
+    // This page: its layers as they were when the stroke began
+    const layer = doc.state.layers.find((item) => item.id === plan.layerId);
+    const shot = plan.sample === "current" && layer ? cloneSource(doc, layer, "current") : cloneSource(doc, layer, plan.sample);
+    return {
+      source: shot.canvas,
+      destination: shot.canvas,
+      sourceX: shot.x - plan.ox - plan.dx,
+      sourceY: shot.y - plan.oy - plan.dy,
+      destinationX: shot.x - plan.dx,
+      destinationY: shot.y - plan.dy,
+    };
+  };
+  const healSamples = (live, box) => {
+    const op = live.op;
+    const plan = op.healingPlan;
+    // A stroke begun before this was made to size carries its samples already
+    if (!plan) return { source: op.healingSource, destination: op.healingDestination, sourceAt: op.healingSourceAt, destinationAt: op.healingDestinationAt };
+    const need = healingBoxOf(op, box);
+    const have = op.healingHave;
+    if (have && need.left >= have.left && need.top >= have.top && need.right <= have.right && need.bottom <= have.bottom) {
+      return { source: op.healingSource, destination: op.healingDestination, sourceAt: op.healingSourceAt, destinationAt: op.healingDestinationAt };
+    }
+    const wide = Math.round((need.right - need.left) / 2);
+    const tall = Math.round((need.bottom - need.top) / 2);
+    const grown = { left: need.left - wide, top: need.top - tall, right: need.right + wide, bottom: need.bottom + tall };
+    if (!op.healingFrom) op.healingFrom = healingFrom(op, plan);
+    const from = op.healingFrom;
+    const width = Math.max(1, grown.right - grown.left);
+    const height = Math.max(1, grown.bottom - grown.top);
+    const source = newCanvas(width, height);
+    const destination = newCanvas(width, height);
+    const sctx = source.getContext("2d", { willReadFrequently: true });
+    const dctx = destination.getContext("2d", { willReadFrequently: true });
+    // What the stroke already read keeps exactly the pixels it was given
+    if (have && op.healingSource) sctx.drawImage(op.healingSource, 0, 0, op.healingSource.width, op.healingSource.height, have.left - grown.left, have.top - grown.top, op.healingSource.width, op.healingSource.height);
+    if (have && op.healingDestination) dctx.drawImage(op.healingDestination, 0, 0, op.healingDestination.width, op.healingDestination.height, have.left - grown.left, have.top - grown.top, op.healingDestination.width, op.healingDestination.height);
+    // And what it has not reached yet is taken from the picture it reads, whole pixels only
+    const lay = (canvas, ctx, x, y) => {
+      if (!canvas) return;
+      ctx.drawImage(canvas, Math.round(x - grown.left), Math.round(y - grown.top));
+    };
+    if (!have) {
+      lay(from && from.source, sctx, from ? from.sourceX : 0, from ? from.sourceY : 0);
+      lay(from && from.destination, dctx, from ? from.destinationX : 0, from ? from.destinationY : 0);
+    } else {
+      // The ring the stroke has not read yet, taken from the picture it reads: the four sides
+      // around the part it already has
+      const edges = [
+        { left: grown.left, top: grown.top, right: grown.right, bottom: have.top },
+        { left: grown.left, top: have.bottom, right: grown.right, bottom: grown.bottom },
+        { left: grown.left, top: have.top, right: have.left, bottom: have.bottom },
+        { left: have.right, top: have.top, right: grown.right, bottom: have.bottom },
+      ];
+      edges.forEach((edge) => {
+        const w = edge.right - edge.left;
+        const h = edge.bottom - edge.top;
+        if (w <= 0 || h <= 0) return;
+        // Cropped from the picture it reads, into the place that edge takes in the sample
+        [[from && from.source, sctx, from ? from.sourceX : 0, from ? from.sourceY : 0], [from && from.destination, dctx, from ? from.destinationX : 0, from ? from.destinationY : 0]].forEach(([canvas, ctx, x, y]) => {
+          if (!canvas) return;
+          ctx.drawImage(canvas, edge.left - x, edge.top - y, w, h, edge.left - grown.left, edge.top - grown.top, w, h);
+        });
+      });
+    }
+    op.healingSource = source;
+    op.healingDestination = destination;
+    op.healingSourceAt = { x: 0, y: 0 };
+    op.healingDestinationAt = { x: 0, y: 0 };
+    op.healingHave = grown;
+    return { source, destination, sourceAt: op.healingSourceAt, destinationAt: op.healingDestinationAt };
+  };
+
   // The source and destination are two offsets into one immutable snapshot. The synchronous
   // path is also the fallback for engines without Worker; browsers use the same full-stroke
   // mathematics off the UI thread below.
-  const healedPixels = (op, box) => {
-    const source = op.healingSource;
-    const destination = op.healingDestination;
-    const sourceAt = op.healingSourceAt;
-    const destinationAt = op.healingDestinationAt;
+  const healedPixels = (op, box, live) => {
+    const samples = healSamples(live || { op }, box);
+    const source = samples.source;
+    const destination = samples.destination;
+    const sourceAt = samples.sourceAt;
+    const destinationAt = samples.destinationAt;
     const shape = clonedPixels(Object.assign({}, op, { source: { canvas: source, x: sourceAt.x, y: sourceAt.y } }), box, (c) => {
       c.strokeStyle = "#000";
       op.points.forEach((point, index) => paintStroke(c, op, index ? [op.points[index - 1], point] : [point]));
@@ -1363,7 +1500,9 @@
     const clear = strokeBox(live.op.points, live.op.size);
     entry.ctx.save();
     entry.ctx.clearRect(clear.left, clear.top, clear.width, clear.height);
-    entry.ctx.drawImage(live.base, clear.left - entry.cx0, clear.top - entry.cy0, clear.width, clear.height, clear.left, clear.top, clear.width, clear.height);
+    // The base is a crop of the layer, wherever the stroke has reached so far
+    const at = live.baseAt || { left: entry.cx0, top: entry.cy0 };
+    entry.ctx.drawImage(live.base, clear.left - at.left, clear.top - at.top, clear.width, clear.height, clear.left, clear.top, clear.width, clear.height);
     entry.ctx.globalCompositeOperation = live.op.atop ? "source-atop" : "source-over";
     entry.ctx.drawImage(shape, box.left, box.top);
     entry.ctx.restore();
@@ -1371,7 +1510,7 @@
   };
   const healingStroke = (entry, live) => {
     const box = strokeBox(live.op.points, live.op.size);
-    paintHealing(entry, live, healedPixels(live.op, box), box);
+    paintHealing(entry, live, healedPixels(live.op, box, live), box);
   };
 
   // Replay the complete original stroke on HTMLCanvas, then transfer immutable bitmap samples.
@@ -1379,12 +1518,13 @@
   const healingData = (live) => {
     const op = live.op;
     const box = strokeBox(op.points, op.size);
-    const sourceAt = op.healingSourceAt;
-    const destinationAt = op.healingDestinationAt;
+    const samples = healSamples(live, box);
+    const sourceAt = samples.sourceAt;
+    const destinationAt = samples.destinationAt;
     const left = Math.max(box.left, sourceAt.x, destinationAt.x);
     const top = Math.max(box.top, sourceAt.y, destinationAt.y);
-    const width = Math.max(0, Math.min(box.left + box.width, sourceAt.x + op.healingSource.width, destinationAt.x + op.healingDestination.width) - left);
-    const height = Math.max(0, Math.min(box.top + box.height, sourceAt.y + op.healingSource.height, destinationAt.y + op.healingDestination.height) - top);
+    const width = Math.max(0, Math.min(box.left + box.width, sourceAt.x + samples.source.width, destinationAt.x + samples.destination.width) - left);
+    const height = Math.max(0, Math.min(box.top + box.height, sourceAt.y + samples.source.height, destinationAt.y + samples.destination.height) - top);
     if (!width || !height) return null;
     const coverage = newCanvas(box.width, box.height);
     const c = coverage.getContext("2d");
@@ -1399,7 +1539,7 @@
       if (op.clip.canvas) c.drawImage(op.clip.canvas, op.clip.x, op.clip.y);
       else c.fillRect(op.clip.x, op.clip.y, op.clip.width, op.clip.height);
     }
-    return { box, left, top, width, height, source: op.healingSource, destination: op.healingDestination, sourceAt, destinationAt, coverage };
+    return { box, left, top, width, height, source: samples.source, destination: samples.destination, sourceAt, destinationAt, coverage };
   };
   let sharedHealingWorker = null;
   let healingWorkerFailed = false;
@@ -1519,8 +1659,18 @@
   else setTimeout(prewarmHealing, 0);
   const prepareHealing = (doc, entry, live) => {
     if (live.base) return;
-    live.base = newCanvas(entry.canvas.width, entry.canvas.height);
-    live.base.getContext("2d").drawImage(entry.canvas, 0, 0);
+    // The layer as it was before the stroke. Every read of it is the stroke's own box, so what is
+    // kept is cropped to it, with room for the stroke to grow.
+    const op = live.op;
+    const box = strokeBox(op.points, op.size);
+    const reach = op.size * 2;
+    const left = Math.max(entry.cx0, Math.floor(box.left - reach));
+    const top = Math.max(entry.cy0, Math.floor(box.top - reach));
+    const right = Math.min(entry.cx1, Math.ceil(box.left + box.width + reach));
+    const bottom = Math.min(entry.cy1, Math.ceil(box.top + box.height + reach));
+    live.base = newCanvas(Math.max(1, right - left), Math.max(1, bottom - top));
+    live.base.getContext("2d").drawImage(entry.canvas, left - entry.cx0, top - entry.cy0, right - left, bottom - top, 0, 0, right - left, bottom - top);
+    live.baseAt = { left, top, right, bottom };
     live.needsJob = false;
     live.preparing = false;
     live.busy = false;
@@ -4116,6 +4266,72 @@
 
   const sizeOf = (doc) => ({ width: doc.width, height: doc.height, resolution: doc.resolution });
 
+  /* ---- a reference from another page ---- */
+
+  // Photoshop lets the Clone Stamp and the Healing Brush take their pixels from another open
+  // document: pick the source there, come back, paint. The other page is composited whole — it
+  // is not the one on screen — so its picture is kept until that page changes, rather than
+  // rebuilt at every stroke: compositing a 10000-pixel page per stroke is what made the brushes
+  // lag on big files.
+  const REFERENCES = new Map();
+  const REFERENCE_LIMIT = 2;
+  const referenceKey = (doc, sample, layer) => `${doc.id}:${sample}:${layer ? layer.id || layer : ""}`;
+  // A page other than the one being painted on, as it looks: whole, or from its chosen layer up,
+  // or just that layer. `quiet` asks without complaining: the preview under the brush asks at
+  // every move, and one page too large is worth one word, not sixty a second.
+  const referenceShot = (doc, sample, layer, quiet) => {
+    if (!doc || !doc.state) return null;
+    // A page bigger than a canvas may be cannot be composed whole: say so rather than fail later
+    if (!canvasFits(doc.width, doc.height)) {
+      // The same complaint the app makes of a page too large to open: it cannot be held whole
+      if (!quiet) emit("alert", { text: "", tooLarge: { width: doc.width, height: doc.height } });
+      return null;
+    }
+    const key = referenceKey(doc, sample, layer);
+    // The page as it is now. Its state object says whether the picture taken before is still it,
+    // which holds even where a change is made without going through a commit, as a dialog's
+    // live preview does
+    const kept = REFERENCES.get(key);
+    if (kept && kept.state !== doc.state) REFERENCES.delete(key);
+    if (kept && kept.state === doc.state) {
+      // Newest use last: the one dropped when the cache is full is the one longest unused
+      REFERENCES.delete(key);
+      REFERENCES.set(key, kept);
+      return kept;
+    }
+    let canvas = null;
+    let x = 0;
+    let y = 0;
+    if (sample === "current" && layer) {
+      const visual = visualOf(layer, doc);
+      if (!visual || !visual.canvas) return null;
+      canvas = newCanvas(visual.canvas.width, visual.canvas.height);
+      canvas.getContext("2d").drawImage(visual.canvas, 0, 0);
+      x = visual.x;
+      y = visual.y;
+    } else {
+      // As that page's own Clone Stamp would read it: everything, or down to the layer chosen
+      // there, which is where "Current and Below" stops
+      const at = sample === "below" && layer ? doc.state.layers.indexOf(layer) : -1;
+      canvas = newCanvas(doc.width, doc.height);
+      paintDoc(doc, canvas.getContext("2d"), { keep: true, skip: at >= 0 ? (item) => doc.state.layers.indexOf(item) > at : null });
+    }
+    const shot = { canvas, x, y, docId: doc.id, state: doc.state };
+    REFERENCES.set(key, shot);
+    while (REFERENCES.size > REFERENCE_LIMIT) REFERENCES.delete(REFERENCES.keys().next().value);
+    return shot;
+  };
+  // A page as a stroke would read it, for the app's preview: the same picture, so that what is
+  // shown under the brush is what the stroke will paint from
+  const referencePicture = (doc, sample, layer) => {
+    const shot = referenceShot(doc, sample || "all", layer || null, true);
+    return shot ? shot.canvas : null;
+  };
+  // Anything committed to a page changes what it would give a stroke: the reference goes
+  const forgetReferences = (doc) => {
+    for (const [key, shot] of REFERENCES) if (shot.docId === doc.id) REFERENCES.delete(key);
+  };
+
   const pushHistory = (doc, name, coalesce) => {
     doc.history.length = doc.historyIndex + 1;
     doc.history.push({ id: newId(), name, state: doc.state, size: sizeOf(doc), coalesce: coalesce || null, time: Date.now() });
@@ -5679,6 +5895,8 @@
   // Gestures that repeat (arrow keys, a slider) make one step of history
   // `rect`, if given, says the part of the page the step changed, once the state is in place
   const commitState = (doc, name, change, coalesce, rect) => {
+    // A page that changed gives a different picture: what a stroke read from it goes
+    forgetReferences(doc);
     doc.state = Object.assign({}, doc.state, change);
     const last = doc.history[doc.historyIndex];
     if (coalesce && last.coalesce === coalesce && (coalesce.indexOf("gesture:") === 0 || Date.now() - last.time < 1500) && doc.historyIndex === doc.history.length - 1) {
@@ -8660,21 +8878,37 @@
           op.color = Object.assign({}, app.bg);
         }
       }
+      // A source taken on another page is that page's picture, kept; from this page it is the
+      // page as it is at the start of the stroke, never what the stroke has just painted
+      const shotOf = (fields) => {
+        if (fields.doc && fields.doc !== doc) {
+          // "Current Layer" and "Current and Below" both stand on the layer chosen on that page
+          const other = fields.layer ? fields.doc.state.layers.find((item) => item.id === fields.layer) : null;
+          return referenceShot(fields.doc, fields.sample, other);
+        }
+        return cloneSource(doc, layer, fields.sample);
+      };
       if (clone) {
-        const shot = cloneSource(doc, layer, clone.sample);
+        const shot = shotOf(clone);
+        if (!shot) return false;
         op.source = { canvas: shot.canvas, x: shot.x - clone.ox - dx, y: shot.y - clone.oy - dy };
       } else if (healing) {
-        const shot = cloneSource(doc, layer, healing.sample);
-        // Keep the original full-stroke algorithm's document coordinates, including for layers
-        // with an offset. CPU-backed snapshots avoid synchronous GPU readback in the fallback;
-        // the Worker receives their crops as ImageBitmaps and performs every pixel read itself.
+        // The two samples a healing stroke reads are made to its own size, not to the page's:
+        // a 12000-pixel page would need three gigabytes of canvases per stroke, and laying them
+        // down is what made the brush stall on big files. They grow with the stroke.
         op.healing = true;
-        op.healingSource = newCanvas(doc.width, doc.height);
-        op.healingDestination = newCanvas(doc.width, doc.height);
-        op.healingSource.getContext("2d", { willReadFrequently: true }).drawImage(shot.canvas, shot.x - healing.ox - dx, shot.y - healing.oy - dy);
-        op.healingDestination.getContext("2d", { willReadFrequently: true }).drawImage(shot.canvas, shot.x - dx, shot.y - dy);
-        op.healingSourceAt = { x: 0, y: 0 };
-        op.healingDestinationAt = { x: 0, y: 0 };
+        op.healingPlan = {
+          doc,
+          // The page the pixels come from, and its layer for "Current Layer"
+          from: healing.doc && healing.doc !== doc ? healing.doc : null,
+          sample: healing.sample,
+          // This page's own layer is the one being painted on; another page's is the one chosen there
+          layerId: healing.doc && healing.doc !== doc ? healing.layer || null : layer.id,
+          ox: healing.ox,
+          oy: healing.oy,
+          dx,
+          dy,
+        };
       } else if (smudge) {
         op.smudge = { strength: Math.max(0.01, Math.min(1, smudge.strength === undefined ? 0.5 : smudge.strength)), finger: smudge.finger || null, sampleAll: Boolean(smudge.sampleAll) };
         // Current Layer reads the live raster directly. A full document snapshot here delayed
@@ -8759,7 +8993,8 @@
           // and is left transparent where it didn't. Painted over another stroke, the square's
           // untouched part would otherwise bring the old pixels back.
           const before = newCanvas(box.width, box.height);
-          if (live.base) before.getContext("2d").drawImage(live.base, box.left - entry.cx0, box.top - entry.cy0, box.width, box.height, 0, 0, box.width, box.height);
+          const at = live.baseAt || { left: entry.cx0, top: entry.cy0 };
+          if (live.base) before.getContext("2d").drawImage(live.base, box.left - at.left, box.top - at.top, box.width, box.height, 0, 0, box.width, box.height);
           const clean = result.getContext("2d", { willReadFrequently: true });
           const patch = clean.getImageData(0, 0, box.width, box.height);
           const older = before.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, box.width, box.height);
@@ -8775,10 +9010,14 @@
             live.op.healingBox = box;
           }
         }
+        // The samples were the stroke's own, made to its size: History replays the patch alone
         delete live.op.healingSource;
         delete live.op.healingDestination;
         delete live.op.healingSourceAt;
         delete live.op.healingDestinationAt;
+        delete live.op.healingFrom;
+        delete live.op.healingHave;
+        delete live.op.healingPlan;
       } else if (live.op.source) cropCloneSource(live.op);
       const paint = (layer.paint || NONE).concat([live.op]);
       const entry = rasterCache.get(layer.id);
@@ -8786,7 +9025,12 @@
         entry.paint = paint;
         if (paint.length % MARK_EVERY === 0) markRaster(entry, paint);
       }
-      commitState(doc, live.op.smudge ? "Smudge" : live.op.healing ? "Healing Brush" : live.op.source ? "Clone Stamp" : live.op.erase ? "Eraser" : "Brush", { layers: replaceLayer(doc, layer, { paint }) });
+      // The stroke changed its own box and nothing else: the screen draws that part back, not the
+      // whole page, which on a 12000-pixel file is what made letting go of the brush show
+      const at = live.op.healing && live.op.healingBox ? live.op.healingBox : strokeBox(live.op.points, live.op.size);
+      const area = pageRect(doc, at.left + (layer.dx || 0), at.top + (layer.dy || 0), at.left + at.width + (layer.dx || 0), at.top + at.height + (layer.dy || 0));
+      const patch = () => area;
+      commitState(doc, live.op.smudge ? "Smudge" : live.op.healing ? "Healing Brush" : live.op.source ? "Clone Stamp" : live.op.erase ? "Eraser" : "Brush", { layers: replaceLayer(doc, layer, { paint }) }, null, patch);
     },
     // Alt+Backspace, Cmd+Backspace, Delete: fills or clears the selection on a pixel layer
     fillSelection(color) {
@@ -10056,6 +10300,8 @@
     },
     jump(index) {
       const doc = app.doc;
+      // A page stepped back or forward to looks different: what a stroke read from it goes
+      forgetReferences(doc);
       const before = sizeOf(doc);
       const { size } = doc.history[index];
       doc.historyIndex = index;
@@ -11304,6 +11550,7 @@
     renderGradient,
     labRange,
     setActiveDoc: (doc) => setDoc(doc),
+    referencePicture,
     paramsFromStyle: (style, text, runs, size) => paramsFromStyle(style, text, runs, size),
     newTextLayer: (doc, params, stroke, name) => newTextLayer(doc, params, stroke, name),
     familyOf: (layers, id) => familyOf(layers, id),

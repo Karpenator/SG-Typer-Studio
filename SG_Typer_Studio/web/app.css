@@ -109,6 +109,9 @@ input[type="range"]:disabled::-moz-range-thumb { background: var(--muted); }
 .obar label > * { color: var(--text); }
 .obar input[type="number"] { width: 52px; }
 .obar__tool { display: flex; align-items: center; gap: 6px; padding-right: 12px; margin-right: 0; border-right: 1px solid var(--line); height: 22px; color: var(--muted); }
+/* Where the Clone Stamp and the Healing Brush take their pixels from: which page, and one click
+   to take them from this one instead */
+.optbar__source { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
 .obar__tool svg { width: 18px; height: 18px; }
 .obar__group { display: inline-flex; gap: 1px; }
 .obar__typer { gap: 12px; padding-left: 12px; border-left: 1px solid var(--line); }

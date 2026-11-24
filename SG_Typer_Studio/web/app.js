@@ -839,20 +839,26 @@
     viewChanged();
   };
 
-  // The picture on screen is drawn at the size it shows: small pages stay sharp
-  const blit = () => {
+  // The picture on screen is drawn at the size it shows: small pages stay sharp.
+  // `dirty` is the part of the page that changed, in the page's own pixels. Only that part is
+  // drawn again: a stroke on a 12000-pixel page touches a brush's worth of it, and scaling the
+  // whole page down to the screen sixty times a second is what made the brushes lag there.
+  const blit = (dirty) => {
     const ratio = dpr();
     const w = Math.round(stageW * ratio);
     const h = Math.round(stageH * ratio);
     if (ui.canvas.width !== w || ui.canvas.height !== h) {
       ui.canvas.width = w;
       ui.canvas.height = h;
+      dirty = null;
     }
     const ctx = ui.canvas.getContext("2d");
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    ctx.clearRect(0, 0, stageW, stageH);
     const doc = app.doc;
-    if (!doc) return;
+    if (!doc) {
+      ctx.clearRect(0, 0, stageW, stageH);
+      return;
+    }
     const v = doc.view;
     const x = Math.round(v.x);
     const y = Math.round(v.y);
@@ -869,12 +875,42 @@
       c.fillRect(8, 8, 8, 8);
       checker = ctx.createPattern(tile, "repeat");
     }
-    ctx.fillStyle = checker;
-    ctx.fillRect(x, y, dw, dh);
     ctx.imageSmoothingEnabled = v.zoom < 2;
     // While something moves, speed: the sharp picture comes when it stops
     ctx.imageSmoothingQuality = pinch || gesture || performance.now() < quickUntil ? "low" : "high";
-    ctx.drawImage(docCanvas, x, y, dw, dh);
+    // The part of the page on screen, and the part of it that changed, in the page's pixels
+    const shownLeft = Math.max(0, -v.x / v.zoom);
+    const shownTop = Math.max(0, -v.y / v.zoom);
+    const shownRight = Math.min(doc.width, (stageW - v.x) / v.zoom);
+    const shownBottom = Math.min(doc.height, (stageH - v.y) / v.zoom);
+    let area = null;
+    if (dirty && dirty.right > shownLeft && dirty.left < shownRight && dirty.bottom > shownTop && dirty.top < shownBottom) {
+      // Two pixels of slack each way: an edge drawn just outside the box still shows whole
+      area = {
+        left: Math.max(shownLeft, dirty.left - 2),
+        top: Math.max(shownTop, dirty.top - 2),
+        right: Math.min(shownRight, dirty.right + 2),
+        bottom: Math.min(shownBottom, dirty.bottom + 2),
+      };
+    }
+    if (!area) {
+      ctx.clearRect(0, 0, stageW, stageH);
+      area = { left: shownLeft, top: shownTop, right: shownRight, bottom: shownBottom };
+    }
+    const sx = Math.max(0, area.left);
+    const sy = Math.max(0, area.top);
+    const sw = Math.min(doc.width, area.right) - sx;
+    const sh = Math.min(doc.height, area.bottom) - sy;
+    if (sw <= 0 || sh <= 0) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(sx * v.zoom + x, sy * v.zoom + y, sw * v.zoom, sh * v.zoom);
+    ctx.clip();
+    ctx.fillStyle = checker;
+    ctx.fillRect(x, y, dw, dh);
+    ctx.drawImage(docCanvas, sx, sy, sw, sh, sx * v.zoom + x, sy * v.zoom + y, sw * v.zoom, sh * v.zoom);
+    ctx.restore();
+    // The page's edge, always over what was just drawn: a stroke can reach it
     ctx.strokeStyle = "#111";
     ctx.lineWidth = 1;
     ctx.strokeRect(x - 0.5, y - 0.5, dw + 1, dh + 1);
@@ -891,14 +927,22 @@
   const paintNow = () => {
     paintRequest = 0;
     const doc = app.doc;
+    // The part of the page that changed in this frame: the screen draws only that part
+    let dirty = null;
     if (doc && needCompose) {
       if (docCanvas.width !== doc.width || docCanvas.height !== doc.height) {
         docCanvas.width = doc.width;
         docCanvas.height = doc.height;
         composeAll = true;
       }
-      if (composeAll || composedDoc !== doc || !composeRect) PS.paintDoc(doc, docCanvas.getContext("2d"), { screen: true });
-      else if (composeRect.right > composeRect.left && composeRect.bottom > composeRect.top) PS.paintDoc(doc, docCanvas.getContext("2d"), { rect: composeRect, screen: true });
+      if (composeAll || composedDoc !== doc || !composeRect) {
+        PS.paintDoc(doc, docCanvas.getContext("2d"), { screen: true });
+        composeAll = true;
+        dirty = null;
+      } else if (composeRect.right > composeRect.left && composeRect.bottom > composeRect.top) {
+        dirty = composeRect;
+        PS.paintDoc(doc, docCanvas.getContext("2d"), { rect: composeRect, screen: true });
+      }
       composedDoc = doc;
     }
     needCompose = false;
@@ -910,7 +954,7 @@
       docCanvas.width = 1;
       docCanvas.height = 1;
     }
-    blit();
+    blit(dirty);
     drawOverlay();
     placeTaskBar();
     placeReview();
@@ -945,6 +989,7 @@
 
   let navigatorGeometry = null;
   let navigatorPan = null;
+  let navigatorPicture = "";
   const renderNavigator = () => {
     const doc = app.doc;
     const preview = ui.navigatorPreview;
@@ -974,12 +1019,18 @@
       ui.navigatorCanvas.width = pixelW;
       ui.navigatorCanvas.height = pixelH;
     }
-    const ctx = ui.navigatorCanvas.getContext("2d");
-    ctx.setTransform(pixelW / shownW, 0, 0, pixelH / shownH, 0, 0);
-    ctx.clearRect(0, 0, shownW, shownH);
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(docCanvas, 0, 0, shownW, shownH);
+    // The page's picture is redrawn only when it changed: a scroll moves the frame alone, and
+    // the frame's own box is redrawn every time
+    const pictureKey = `${doc.id}:${doc.liveStroke ? doc.historyIndex : doc.state}`;
+    if (navigatorPicture !== pictureKey) {
+      navigatorPicture = pictureKey;
+      const ctx = ui.navigatorCanvas.getContext("2d");
+      ctx.setTransform(pixelW / shownW, 0, 0, pixelH / shownH, 0, 0);
+      ctx.clearRect(0, 0, shownW, shownH);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(docCanvas, 0, 0, shownW, shownH);
+    }
     const v = doc.view;
     const x0 = Math.max(0, -v.x / v.zoom);
     const y0 = Math.max(0, -v.y / v.zoom);
@@ -6436,6 +6487,27 @@
           sample.blur();
         });
         bar.appendChild(labelled(T("Sample"), sample));
+        // Which page the source sits on: said plainly, and let go with one click
+        if (hasStampSource()) {
+          const where = document.createElement("span");
+          where.className = "optbar__source";
+          const elsewhere = sourceIsElsewhere();
+          where.textContent = elsewhere ? fill(T("Source: {page}"), { page: state.doc.name }) : T("Source: this page");
+          where.title = elsewhere ? T("The source was taken on another page open in a tab. Alt + click here takes one from this page again.") : T("Alt + click takes the source from here. Another tab: switch there, Alt + click, come back.");
+          bar.appendChild(where);
+          if (elsewhere) {
+            const back = document.createElement("button");
+            back.type = "button";
+            back.className = "btn btn--small";
+            back.textContent = T("Use this page");
+            back.addEventListener("click", () => {
+              Object.assign(stampState(), { doc: app.doc, layer: null, offset: null, pointer: null });
+              renderOptions();
+              schedule(false);
+            });
+            bar.appendChild(back);
+          }
+        }
       }
     }
     if ((tool === "heal" || tool === "gradient") && window.TypeRRetouch) window.TypeRRetouch.options(bar);
@@ -6522,6 +6594,10 @@
     return app.selectionMode;
   };
 
+  // The source of the Clone Stamp or the Healing Brush: on this page, or on another one open in a
+  // tab. Taken once, it stays with that page's pixels wherever the stroke is painted.
+  const stampFields = (state) => ({ ox: state.offset ? state.offset[0] : 0, oy: state.offset ? state.offset[1] : 0, sample: state.sample, doc: state.doc || app.doc, layer: state.layer || null });
+
   const strokeFields = (tool) => {
     const { size, hardness } = app.brush;
     const shape = { size, hardness };
@@ -6533,7 +6609,9 @@
     if (painting && tool !== "stamp" && tool !== "healing") return Object.assign(shape, { target: painting.target, gray: PS.grayOf(toRgb(tool === "eraser" ? app.bg : app.fg)), erase: tool === "eraser" });
     if (tool === "stamp" || tool === "healing") {
       const state = tool === "healing" ? healing : stamp;
-      return Object.assign(shape, { color: { red: 0, green: 0, blue: 0 }, [tool === "healing" ? "healing" : "clone"]: { ox: state.offset[0], oy: state.offset[1], sample: state.sample } });
+      // `doc` and `layer`: the page the source was taken on, and its layer for "Current Layer".
+      // A source on another tab samples that page, as in Photoshop.
+      return Object.assign(shape, { color: { red: 0, green: 0, blue: 0 }, [tool === "healing" ? "healing" : "clone"]: stampFields(state) });
     }
     if (tool === "smudge") return { size, hardness, smudge: { strength: smudge.strength / 100, finger: smudge.finger ? toRgb(app.fg) : null, sampleAll: smudge.sampleAll } };
     return Object.assign(shape, tool === "eraser" ? { erase: true } : { color: toRgb(app.fg) });
@@ -6730,9 +6808,18 @@
   const stamp = { doc: null, x: 0, y: 0, offset: null, aligned: true, sample: "below", pointer: null };
   const healing = { doc: null, x: 0, y: 0, offset: null, aligned: true, sample: "below", pointer: null };
   const stampState = () => app.tool === "healing" ? healing : stamp;
-  const hasStampSource = () => stampState().doc === app.doc && Boolean(app.doc);
+  // A source may be taken on the page being painted, or on another one open in a tab, as in
+  // Photoshop: Alt + click there, come back here, paint. Its page is the reference.
+  const hasStampSource = () => Boolean(app.doc) && Boolean(stampState().doc) && app.docs.includes(stampState().doc);
+  const sourceIsElsewhere = () => hasStampSource() && stampState().doc !== app.doc;
+  // The page a source was taken on can be closed: a stroke with nothing to read says so, rather
+  // than reaching for a page that is no longer open
+  const sourceGone = () => Boolean(stampState().doc) && !app.docs.includes(stampState().doc);
   const setStampSource = ([x, y]) => {
-    Object.assign(stampState(), { doc: app.doc, x, y, offset: null });
+    // Which layer of that page is sampled, for "Current Layer"
+    const layer = app.doc && app.doc.state.layers.find((item) => item.id === app.doc.state.activeIds[app.doc.state.activeIds.length - 1]);
+    Object.assign(stampState(), { doc: app.doc, layer: layer && layer.kind === "raster" ? layer.id : null, x, y, offset: null });
+    renderOptions();
     schedule(false);
   };
   // In whole pixels: between two of them, the browser would blend the source to place it. The
@@ -6742,17 +6829,31 @@
     return [Math.floor(state.x) - Math.floor(x), Math.floor(state.y) - Math.floor(y)];
   };
   const stampSourceAt = () => {
-    if (!hasStampSource()) return null;
+    if (!hasStampSource() || sourceIsElsewhere()) return null;
     const state = stampState();
     return state.offset && state.pointer ? [state.pointer[0] + state.offset[0], state.pointer[1] + state.offset[1]] : [state.x, state.y];
   };
   const hideStampPreview = () => {
     $("stamp-preview").hidden = true;
   };
+  // The page a source was taken on as a picture, at its own place and zoom, for the preview
+  const referencePicture = () => {
+    const state = stampState();
+    if (!state.doc || state.doc === app.doc) return null;
+    const layer = state.layer ? state.doc.state.layers.find((item) => item.id === state.layer) : null;
+    return PS.referencePicture(state.doc, state.sample, layer);
+  };
   // Inside the brush, what the stroke would paint there
   const showStampPreview = (event) => {
     const preview = $("stamp-preview");
     if (!hasStampSource() || gesture || event.pointerType === "touch") {
+      preview.hidden = true;
+      return;
+    }
+    // A source on another page is on screen here as its own page, at its own zoom and its own
+    // place: its pixels, cut where the stroke's source falls, are drawn through that
+    const elsewhere = sourceIsElsewhere();
+    if (elsewhere && !referencePicture()) {
       preview.hidden = true;
       return;
     }
@@ -6770,7 +6871,15 @@
     ctx.clearRect(0, 0, side, side);
     // As the page itself shows it at this zoom
     ctx.imageSmoothingEnabled = zoom < 2;
-    ctx.drawImage(docCanvas, point[0] + offset[0] - size / 2, point[1] + offset[1] - size / 2, size, size, 0, 0, side, side);
+    if (elsewhere) {
+      // The other page at its own zoom: where its pixel under the pointer sits on its canvas
+      const other = stampState().doc.view;
+      const sx = (point[0] + offset[0]) * other.zoom + other.x;
+      const sy = (point[1] + offset[1]) * other.zoom + other.y;
+      ctx.drawImage(referencePicture(), sx - (size * other.zoom) / 2, sy - (size * other.zoom) / 2, size * other.zoom, size * other.zoom, 0, 0, side, side);
+    } else {
+      ctx.drawImage(docCanvas, point[0] + offset[0] - size / 2, point[1] + offset[1] - size / 2, size, size, 0, 0, side, side);
+    }
     const edge = `radial-gradient(circle closest-side, #000 ${hardness}%, transparent 100%)`;
     Object.assign(preview.style, { left: `${event.clientX - rect.left}px`, top: `${event.clientY - rect.top}px`, width: `${side}px`, height: `${side}px`, maskImage: edge, webkitMaskImage: edge });
     preview.hidden = false;
@@ -7353,10 +7462,19 @@
         setStampSource(point);
         return;
       }
+      if (sourceGone()) {
+        // Its page was closed: the source goes with it, and this click says why nothing is painted
+        Object.assign(state, { doc: null, layer: null, x: 0, y: 0, offset: null, pointer: null });
+        renderOptions();
+        toast(T(tool === "healing" ? "The page the healing source was taken on is closed. Alt + click to choose another." : "The page the clone source was taken on is closed. Alt + click to choose another."));
+        return;
+      }
       if (!hasStampSource()) {
         toast(T(tool === "healing" ? "Alt + click to choose the healing source first." : "Alt + click first, on what you want to clone."));
         return;
       }
+      // The offset is from where the source was taken to where the stroke starts: taken on another
+      // tab, the first stroke on this page puts the source pixel under the pointer, as in Photoshop
       if (!state.aligned || !state.offset) state.offset = stampOffsetFrom(point);
       state.pointer = point;
       hideStampPreview();
@@ -9373,7 +9491,10 @@
       const shownName = ui.layers.querySelector(`#layer-row-${typed.id} .layer__name`);
       if (shownName && !shownName.firstElementChild && shownName.textContent !== typed.name) shownName.textContent = typed.name;
     }
-    const key = JSON.stringify([doc.id, doc.state.activeIds, doc.historyIndex, doc.state.layers.map((layer) => [layer.id, layer.visible, typed === layer ? "" : layer.name, layer.locked, layer.open, (layer.paint || []).length, Boolean(layer.clipping), layer.color || "", layer.locks || 0, PS.fillOf(layer), layer.link || 0, hasFx(layer) ? [layer.stroke || 0, layer.kind === "text" ? layer.effects || 0 : 0, fxOpen.has(layer.id)] : 0]), Fonts.generation, target ? [target.id, target.part] : null, doc.maskView ? doc.maskView.mode : null, thumbPixels(), layerFind.open, layerFind.words, Array.from(layerFind.kinds)]);
+    // A stroke makes a new History step but leaves the list as it was: its thumbnails are the
+    // layer's picture whole, not the brush's last dab, so the list is not rebuilt per stroke
+    const thumbKey = doc.liveStroke ? Math.floor(doc.historyIndex / 8) : doc.historyIndex;
+    const key = JSON.stringify([doc.id, doc.state.activeIds, thumbKey, doc.state.layers.map((layer) => [layer.id, layer.visible, typed === layer ? "" : layer.name, layer.locked, layer.open, (layer.paint || []).length, Boolean(layer.clipping), layer.color || "", layer.locks || 0, PS.fillOf(layer), layer.link || 0, hasFx(layer) ? [layer.stroke || 0, layer.kind === "text" ? layer.effects || 0 : 0, fxOpen.has(layer.id)] : 0]), Fonts.generation, target ? [target.id, target.part] : null, doc.maskView ? doc.maskView.mode : null, thumbPixels(), layerFind.open, layerFind.words, Array.from(layerFind.kinds)]);
     if (key === layersKey) return;
     layersKey = key;
     const byId = new Map(doc.state.layers.map((layer) => [layer.id, layer]));
@@ -17497,7 +17618,8 @@
     if (type === "render" || type === "history" || type === "active") refreshAfterChange();
     else if (type === "selection") showSelection(detail);
     else if (type === "options") renderOptions();
-    else if (type === "alert") toast(detail.text, true);
+    // A page too large to take a source from says so in the words of one too large to open
+    else if (type === "alert") toast(detail.tooLarge ? tooLargeText(detail.tooLarge.width, detail.tooLarge.height) : detail.text, true);
     else if (type === "confirm") {
       dialog({ title: "TypeR", body: detail.text }).then((answer) => detail.answer(Boolean(answer)));
     } else if (type === "document") {
