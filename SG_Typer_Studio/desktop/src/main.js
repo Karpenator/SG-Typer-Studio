@@ -494,6 +494,20 @@ const localJob = async (event, id, run) => {
 ipcMain.handle("local-ai-status", (event) => (fromPage(event) ? localAI.status() : null));
 ipcMain.handle("local-ai-install", (event, id, model) => localJob(event, id, (signal, tell) => localAI.install(String(model), signal, tell)));
 ipcMain.handle("local-ai-remove", (event, model) => (fromPage(event) ? localAI.remove(String(model)) : null));
+// The settings show where the models go and open that folder: a user moving them to another disk
+// sees the place, not just the letter of a drive
+ipcMain.handle("local-ai-folder", async (event) => {
+  if (!fromPage(event)) return null;
+  const folder = localAI.folder();
+  await fs.promises.mkdir(folder, { recursive: true });
+  return folder;
+});
+ipcMain.handle("local-ai-show", async (event) => {
+  if (!fromPage(event)) return false;
+  const folder = localAI.folder();
+  await fs.promises.mkdir(folder, { recursive: true });
+  return !(await shell.openPath(folder));
+});
 ipcMain.handle("local-ai-generate", (event, id, request) => localJob(event, id, (signal, tell) => {
   const { model, image, mask, prompt, width, height } = request || {};
   if (!(image instanceof Uint8Array) || !(mask instanceof Uint8Array) || !Number.isFinite(width) || !Number.isFinite(height) || width > 2048 || height > 2048) throw new localAI.LocalError("other", "Bad request.");

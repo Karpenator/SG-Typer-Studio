@@ -71,6 +71,8 @@ const missing = (model) => {
 const status = () => ({
   available: Boolean(engine) && enoughMemory,
   memory: enoughMemory,
+  // Where the models and the engine are kept, so the settings can say it and open it
+  folder: root(),
   models: Object.fromEntries(Object.keys(MODELS).map((model) => [model, { installed: installed(model), download: missing(model), size: filesOf(model).reduce((sum, key) => sum + FILES[key].size, 0) + (engine ? engine.size : 0) }])),
 });
 
@@ -394,4 +396,4 @@ process.on("exit", () => {
 // Left by the last session, if it ended badly
 if (engine) app.whenReady().then(killLeftover).catch(() => {});
 
-module.exports = { status, install, remove, generate, stopServer, LocalError };
+module.exports = { status, install, remove, generate, stopServer, folder: root, LocalError };

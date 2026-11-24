@@ -748,7 +748,7 @@
     window.addEventListener("pointerup", release, true);
     window.addEventListener("pointercancel", release, true);
   }, true);
-  // Keep every representation live, including Alt + right-drag and a preset chosen in the
+  // Keep every representation live, including Ctrl + Alt + right-drag and a preset chosen in the
   // Brushes panel. Never rebuild the option bar here: doing so would capture the active drag.
   const syncBrushControls = () => {
     ["size", "hardness"].forEach((key) => {
@@ -756,6 +756,11 @@
         input.value = app.brush[key];
         if (input.type === "range") showSliderFill(input);
       });
+    });
+    // The Smudge tool's Strength, changed by Ctrl + Alt + right-drag or by its slider
+    ui.options.querySelectorAll('[data-brush-control="strength"]').forEach((input) => {
+      input.value = smudge.strength;
+      if (input.type === "range") showSliderFill(input);
     });
     previewBrush();
   };
@@ -2200,12 +2205,12 @@
     polygon: "Click to place each corner. Shift: 45° steps. Alt held: draw freehand. Close: click the first corner, double-click or Enter. Backspace: remove the last corner. Esc: cancel. Shift before: add, Alt before: subtract.",
     wand: "Click a bubble: TypeR pastes the next line in it. Shift: add, Alt: subtract.",
     crop: "Drag the edges, or draw a new frame. Shift: keep the proportions. Alt: from the centre. Enter: crop. Esc: cancel.",
-    brush: "Paints on the active pixel layer. [ ]: size. Alt: eyedropper. Alt + right-drag: size / hardness.",
-    eraser: "Erases on the active pixel layer. [ ]: size. Alt + right-drag: size / hardness.",
+    brush: "Paints on the active pixel layer. [ ]: size. Alt: eyedropper. Ctrl + Alt + right-drag: size / hardness.",
+    eraser: "Erases on the active pixel layer. [ ]: size. Ctrl + Alt + right-drag: size / hardness.",
     magicEraser: "Click: the area of that colour on the active pixel layer goes transparent, as the Magic Wand would select it. A Background becomes a normal layer.",
-    stamp: "Alt + click: where to clone from. Then paint. [ and ] change the size. Alt + right-drag: size / hardness.",
-    healing: "Alt + click: where to heal from. Then paint: the source texture takes the destination's colour and lighting. [ and ] change the size. Alt + right-drag: size / hardness.",
-    smudge: "Drag colours through the active pixel layer. Strength sets how far they travel. Finger Painting starts with the foreground colour. [ and ] change the size. Alt + right-drag: size / hardness.",
+    stamp: "Alt + click: where to clone from. Then paint. [ and ] change the size. Ctrl + Alt + right-drag: size / hardness.",
+    healing: "Alt + click: where to heal from. Then paint: the source texture takes the destination's colour and lighting. [ and ] change the size. Ctrl + Alt + right-drag: size / hardness.",
+    smudge: "Drag colours through the active pixel layer. Strength sets how far they travel. Finger Painting starts with the foreground colour. [ and ] change the size. Ctrl + Alt + right-drag: size / strength.",
     heal: "Paint over a spot, a letter or a line: it is filled with what surrounds it. Shift + click: a straight line from the last stroke. [ ]: size. With no pixel layer active, it heals on TypeR Clean.",
     gradient: "Drag from where the gradient starts to where it ends. Shift: 45° steps. Alt: eyedropper. Then drag its ends to adjust it. On a text or an SFX: a new layer clipped to it.",
     clean: "Click a bubble: its text goes, painted over in the bubble's own colours, whatever they are. Drag a box, a lasso or a polygon: only inside it, for text on a plain background. Ctrl: lasso, Alt: polygonal lasso, Shift: box, held or pressed once.",
@@ -4197,6 +4202,25 @@
         // and whether it's downloaded, are in the list of models)
         const named = modelName({ custom, service }, model);
         price.textContent = fill(T("Free, on this computer: {model} redraws the selection from what surrounds it, and follows your prompt if you write one. About a minute per fill with a good graphics card, much longer without one."), { model: named });
+        // The folder the models go to, said plainly and openable: they need gigabytes, and the
+        // first drive is not always the roomy one (TYPER_LOCAL_AI_DIR moves it)
+        const folderLine = document.createElement("span");
+        folderLine.className = "gensettings__local";
+        price.append(" ", folderLine);
+        Gen.localFolder().then((folder) => {
+          if (!folder || !folderLine.isConnected) return;
+          folderLine.textContent = `${T("Installed in:")} `;
+          const where = document.createElement("code");
+          where.className = "gensettings__path";
+          where.textContent = folder;
+          where.title = T("Practically, the disk with this folder must have the free space the model needs. Set TYPER_LOCAL_AI_DIR to keep it elsewhere.");
+          const open = document.createElement("button");
+          open.type = "button";
+          open.className = "btn btn--small";
+          open.textContent = T("Open Folder");
+          open.addEventListener("click", () => Gen.localShowFolder().catch(() => null));
+          folderLine.append(where, " ", open);
+        });
         Gen.localStatus().then((now) => {
           const here = now && now.models && now.models[model];
           if (!here || !price.isConnected || modelSelect.value !== model) return;
@@ -5121,11 +5145,10 @@
     ]);
     return [main, more];
   };
-  // With nothing selected and no text picked, the bar offers Detect Text, under the page
-  // With nothing selected, the bar offers Detect Text only with a tool for cleaning the page:
-  // whoever only letters doesn't see it. The marquees have it in their options bar instead, as
-  // the Bubble Cleaner also does; and it's always in Select > Text.
-  const TEXT_BAR_TOOLS = new Set(["clean", "heal", "stamp", "smudge", "brush", "eraser", "magicEraser", "lasso", "polygon", "wand"]);
+  // With nothing selected, the bar offers Detect Text under the page, whatever tool is picked:
+  // the text is what it finds, and the tool chosen after it still works on it. It goes away only
+  // when the bar is hidden with its close button (Window > Contextual Task Bar brings it back).
+  // Select > Text does the same from the menu.
   const placeTextBar = (doc) => {
     const several = app.docs.length > 1;
     const picked = several ? pickedDocs() : [];
@@ -5445,7 +5468,7 @@
   const placeSelectionBar = () => {
     const doc = app.doc;
     const selection = doc && doc.state.selection;
-    if (!selection && TextMask && TextMask.available() && TEXT_BAR_TOOLS.has(app.tool) && doc && !doc.state.quickMask && !gesture && !polygon && !transformOf() && !cropOf() && !warpedLayer() && !pixelsOnly()) {
+    if (!selection && TextMask && TextMask.available() && doc && !doc.state.quickMask && !gesture && !polygon && !transformOf() && !cropOf() && !warpedLayer() && !maskPainting()) {
       placeTextBar(doc);
       return;
     }
@@ -6278,15 +6301,35 @@
         syncBrushControls();
       });
       previewWhileHeld(hardness);
-      // The Spot Healing Brush blends its edge by itself
-      if (tool === "heal") bar.append(labelled(T("Size"), size), number);
-      else bar.append(labelled(T("Size"), size), number, labelled(T("Hardness"), hardness), percent);
-      bar.appendChild(iconButton("brush", T("Brushes"), Workspace().isVisible("brushes"), () => Workspace().toggle("brushes")));
       if (tool === "smudge") {
-        const strength = numberInput(smudge.strength, 1, 100, (value) => { smudge.strength = Math.max(1, Math.min(100, value)); });
-        bar.appendChild(scrubbed(T("Strength"), strength));
+        // The Smudge tool's own: Strength first, with the same slider and number as Size, since
+        // it is what a stroke leans on; its hardness, barely felt, comes after
+        const strengthSlider = document.createElement("input");
+        strengthSlider.type = "range";
+        strengthSlider.dataset.brushControl = "strength";
+        strengthSlider.min = 1;
+        strengthSlider.max = 100;
+        strengthSlider.value = smudge.strength;
+        showSliderFill(strengthSlider);
+        const strengthNumber = numberInput(smudge.strength, 1, 100, (value) => {
+          smudge.strength = Math.max(1, Math.min(100, value));
+          syncBrushControls();
+        });
+        strengthNumber.dataset.brushControl = "strength";
+        strengthSlider.addEventListener("input", () => {
+          smudge.strength = Number(strengthSlider.value);
+          syncBrushControls();
+        });
+        previewWhileHeld(strengthSlider);
+        bar.append(labelled(T("Size"), size), number, labelled(T("Strength"), strengthSlider), strengthNumber, labelled(T("Hardness"), hardness), percent);
+        bar.appendChild(iconButton("brush", T("Brushes"), Workspace().isVisible("brushes"), () => Workspace().toggle("brushes")));
         bar.appendChild(checkbox(T("Finger Painting"), smudge.finger, (on) => { smudge.finger = on; }));
         bar.appendChild(checkbox(T("Sample all layers"), smudge.sampleAll, (on) => { smudge.sampleAll = on; }));
+      } else {
+        // The Spot Healing Brush blends its edge by itself
+        if (tool === "heal") bar.append(labelled(T("Size"), size), number);
+        else bar.append(labelled(T("Size"), size), number, labelled(T("Hardness"), hardness), percent);
+        bar.appendChild(iconButton("brush", T("Brushes"), Workspace().isVisible("brushes"), () => Workspace().toggle("brushes")));
       }
       if (tool === "stamp" || tool === "healing") {
         const state = tool === "healing" ? healing : stamp;
@@ -6412,11 +6455,14 @@
     return Object.assign(shape, tool === "eraser" ? { erase: true } : { color: toRgb(app.fg) });
   };
 
-  // Alt and the right button, or Ctrl, Option and a click on a Mac, as in Photoshop: the brush
-  // shows where it was pressed, in red. Sideways is its size, its edge following the pointer.
-  // Down makes it harder, up softer.
-  const isBrushAdjust = (event) => (event.button === 2 && event.altKey) || (IS_MAC && event.button === 0 && event.ctrlKey && event.altKey);
-  // Alt turns the brush into the eyedropper while it is held, except during what it is already doing
+  // Ctrl and Alt together with the right button, as in Photoshop (Windows and Mac alike: a Mac's
+  // Control-click is one button, so Option alone stays on Alt + right-drag): the brush shows where
+  // it was pressed, in red. Sideways is its size, its edge following the pointer. Down makes it
+  // harder, up softer. One key less counts as the eyedropper, so Alt with the right button picks a
+  // colour, as Alt does with the left one.
+  const isBrushAdjust = (event) => (event.button === 2 && event.altKey && (event.ctrlKey || event.metaKey)) || (IS_MAC && event.button === 0 && event.ctrlKey && event.altKey);
+  // Alt turns the brush into the eyedropper while it is held, except during what it is already
+  // doing. With Ctrl or Cmd too, the brush resize has it first, so no eyedropper is left behind.
   const isSampling = (event) => (Boolean(sampleColorForPicker) && !spacing) || ((app.tool === "brush" || app.tool === "gradient") && event.altKey && !event.ctrlKey && !event.metaKey && !spacing);
   // Ctrl or Cmd sets the wand aside for as long as it is held: a click on a text edits it, a drag
   // moves it, and nothing gets selected.
@@ -6427,6 +6473,19 @@
   const LENDS_MOVE = new Set(["rectangle", "ellipse", "lasso", "polygon", "brush", "eraser", "magicEraser", "stamp", "healing", "heal", "smudge", "gradient", "eyedropper", "text"]);
   const moveLent = (event) => LENDS_MOVE.has(app.tool) && (IS_MAC ? event.metaKey : event.ctrlKey) && !spacing && !polygon && Boolean(app.doc) && !transformOf();
   let hoverAt = null;
+  // Where the pointer last was, in the stage's own pixels: [ to ] draws the new size there at
+  // once, without waiting for the next move
+  let brushAt = null;
+  // The brush ring at the pointer, at the size and hardness it has now
+  const showBrushAtPointer = () => {
+    const tools = new Set(["brush", "eraser", "stamp", "healing", "heal", "smudge"]);
+    if (!brushAt || !tools.has(app.tool) || !app.doc || gesture || !ui.editor.hidden) return;
+    const zoom = view().zoom;
+    ui.brushRing.setAttribute("cx", brushAt[0]);
+    ui.brushRing.setAttribute("cy", brushAt[1]);
+    ui.brushRing.setAttribute("r", Math.max(1, (app.brush.size / 2) * zoom));
+    ui.brushRing.removeAttribute("hidden");
+  };
   const ADAPTIVE_CURSOR_TOOLS = new Set(["wand", "magicEraser", "clean", "rectangle", "ellipse", "lasso", "polygon", "crop", "gradient"]);
   const adaptiveCursor = (kind, color) => {
     // Choose the higher-contrast ink for the page pixel, rather than for the stage's theme.
@@ -6505,7 +6564,8 @@
     ui.brushRing.setAttribute("cy", y);
     ui.brushRing.setAttribute("r", diameter / 2);
     ui.brushRing.removeAttribute("hidden");
-    hud(`${T("Diameter")}: ${size} px\n${T("Hardness")}: ${hardness}%`, event);
+    // The Smudge tool's Strength is what Ctrl + Alt + right-drag changes: its hardness hardly matters
+    hud(app.tool === "smudge" ? `${T("Diameter")}: ${size} px\n${T("Strength")}: ${smudge.strength}%` : `${T("Diameter")}: ${size} px\n${T("Hardness")}: ${hardness}%`, event);
   };
   // The options bar's size and hardness show the brush the same way, in the middle of the
   // stage since the pointer is elsewhere: for as long as a slider is held, and a moment more.
@@ -6956,9 +7016,10 @@
       return;
     }
     if ((tool === "brush" || tool === "eraser" || tool === "stamp" || tool === "healing" || tool === "heal" || tool === "smudge") && isBrushAdjust(event)) {
-      gesture = Object.assign(base, { kind: "brushAdjust", size: app.brush.size, hardness: app.brush.hardness, slop: 0 });
+      gesture = Object.assign(base, { kind: "brushAdjust", size: app.brush.size, hardness: app.brush.hardness, strength: smudge.strength, slop: 0 });
       ui.stage.setPointerCapture(event.pointerId);
-      showSampling(event);
+      // Ctrl + Alt + right-drag is no eyedropper: the ring alone follows, as the brush grows
+      ui.stage.classList.remove("is-sampling");
       showBrushAdjust(gesture, event);
       event.preventDefault();
       return;
@@ -7256,10 +7317,8 @@
     }
     if ((tool === "brush" || tool === "eraser" || tool === "stamp" || tool === "healing" || tool === "heal" || tool === "smudge") && !(event.pointerType === "touch" && !gesture) && !(gesture && gesture.kind === "brushAdjust")) {
       const rect = stageRectOf(event);
-      ui.brushRing.setAttribute("cx", event.clientX - rect.left);
-      ui.brushRing.setAttribute("cy", event.clientY - rect.top);
-      ui.brushRing.setAttribute("r", Math.max(1, (app.brush.size / 2) * view().zoom));
-      ui.brushRing.removeAttribute("hidden");
+      brushAt = [event.clientX - rect.left, event.clientY - rect.top];
+      showBrushAtPointer();
     }
     if ((tool === "move" || !ui.editor.hidden) && !gesture && app.doc) {
       const over = hitHandle(event);
@@ -7303,7 +7362,9 @@
     }
     if (current.kind === "brushAdjust") {
       app.brush.size = Math.max(1, Math.min(2000, Math.round(current.size + (2 * (event.clientX - current.x)) / view().zoom)));
-      app.brush.hardness = Math.max(0, Math.min(100, Math.round(current.hardness + (event.clientY - current.y) / 2)));
+      // Sideways the size, up and down the hardness, or the Smudge tool's Strength, as in Photoshop
+      if (app.tool === "smudge") smudge.strength = Math.max(1, Math.min(100, Math.round(current.strength + (event.clientY - current.y) / 2)));
+      else app.brush.hardness = Math.max(0, Math.min(100, Math.round(current.hardness + (event.clientY - current.y) / 2)));
       syncBrushControls();
       showBrushAdjust(current, event);
       return;
@@ -7576,6 +7637,9 @@
       renderOptions();
     } else if (kind === "brushAdjust") {
       ui.brushPreview.hidden = true;
+      // The pointer may still hold Alt and Ctrl: the ring, the brush or the eyedropper decide
+      // again on the next move, none is left on the page meanwhile
+      showSampling(event);
       renderOptions();
     } else if (kind === "scale" || kind === "scaleTexts") {
       // The size in the options bar follows the handles
@@ -9431,7 +9495,7 @@
         event.preventDefault();
         if (Shell.touch) return;
         if (!doc.state.activeIds.includes(layer.id)) ops.selectLayer(layer.id);
-        openContextMenu(event.clientX, event.clientY, [{ label: "Rename", action: () => renameRow(layer, name) }, "Duplicate Layer", "Delete Layer", null, "Group Layers", "Ungroup Layers", null, addMaskItem, addVectorMaskItem, "Create Clipping Mask", null, "Blending Options…", null, "Copy Layer", "Paste Layer", "Copy Layer Style", "Paste Layer Style", null, "Convert to Paragraph Text", "Convert to Point Text", "Rasterize Type", null, "Convert to SFX", "Separate SFX Letters", "Keep in the bank…", null, "Merge Down", "Merge Visible", "Flatten Image", null, "Similar Layers", null, ...labelItems()]);
+        openContextMenu(event.clientX, event.clientY, [{ label: "Rename", action: () => renameRow(layer, name) }, "Duplicate Layer", "Delete Layer", null, "Group Layers", "Ungroup Layers", null, addMaskItem, addVectorMaskItem, "Create Clipping Mask", null, "Blending Options…", null, "Copy Layer", "Paste Layer", "Copy Layer Style", "Paste Layer Style", null, "Convert to Paragraph Text", "Convert to Point Text", "Rasterize Type", "Rasterize Layer", null, "Convert to SFX", "Separate SFX Letters", "Keep in the bank…", null, "Merge Down", "Merge Visible", "Flatten Image", null, "Similar Layers", null, ...labelItems()]);
       });
       row.addEventListener("click", (event) => {
         // Cmd + click on a thumbnail: its pixels as a selection, and with Shift, added to it
@@ -15850,6 +15914,7 @@
       { label: "Hyphenate", keys: "Alt+Shift+Cmd+H", anywhere: true, check: hyphenateShown, enabled: hasDoc, action: () => setHyphenate(!hyphenateShown()) },
       { label: "Perspective", keys: "Shift+P", enabled: () => activeTexts().length === 1 && !activeTexts()[0].rotated, action: () => enterSurface(activeTexts()[0]) },
       { label: "Rasterize Type", enabled: () => activeTexts().length > 0, action: () => activeTexts().forEach((layer) => ops.rasterizeText(layer.id)) },
+      { label: "Rasterize Layer", keys: "Shift+Cmd+Y", enabled: () => activeLayers().some(canRasterize), action: () => activeLayers().filter(canRasterize).forEach((layer) => ops.rasterizeLayer(layer.id)) },
       null,
       { label: "New SFX", enabled: hasDoc, action: () => { setTool("sfx"); window.TypeRSFX.newSfx({}); } },
       { label: "Convert to SFX", enabled: () => Boolean(window.TypeRSFX && window.TypeRSFX.canConvert()), action: () => window.TypeRSFX.convert() },
@@ -15980,9 +16045,16 @@
     else if (pair) setTool(app.tool === pair[0] ? pair[1] : pair[0]);
     else setTool(id);
   };
+  // [ and ]: the size changes now, not when the options bar is built again. The controls and the
+  // ring are brought up to date in place, so a held key steps the size without rebuilding the bar.
   const scaleBrush = (factor) => {
     app.brush.size = Math.max(1, Math.round(app.brush.size * factor));
-    renderOptions();
+    // The same bar, at once: only the numbers and the sliders change, nothing is built again
+    const shown = ui.options.querySelector('[data-brush-control="size"]');
+    if (shown) {
+      syncBrushControls();
+      showBrushAtPointer();
+    } else renderOptions();
   };
   const TOOL_ITEMS = TOOLS.filter(Boolean).map((entry) => ({ label: entry[1], keys: entry[2], entry, virtual: true, action: () => pickTool(entry[0]) }));
   const MORE_ITEMS = [
@@ -15999,6 +16071,9 @@
     { label: "Show the mask in red", keys: "\\", virtual: true, action: () => toggleMaskView("overlay") },
   ];
   const hasText = () => activeTexts().length > 0;
+  // What Rasterize Layer turns into pixels: a text. A pixel layer, a folder and a curve are
+  // already what they are, and Photoshop merges a folder instead of rasterizing it
+  const canRasterize = (layer) => Boolean(layer) && layer.kind === "text";
   const LAYER_AND_TEXT_ITEMS = [
     { label: "Select the layer above", keys: "Alt+]", enabled: hasDoc, action: () => selectNeighbourLayer(1, false, true) },
     { label: "Select the layer below", keys: "Alt+[", enabled: hasDoc, action: () => selectNeighbourLayer(-1, false, true) },

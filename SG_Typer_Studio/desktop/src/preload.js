@@ -86,6 +86,8 @@ contextBridge.exposeInMainWorld("TypeRDesktop", {
     status: () => ipcRenderer.invoke("local-ai-status"),
     install: (id, model) => ipcRenderer.invoke("local-ai-install", id, model),
     remove: (model) => ipcRenderer.invoke("local-ai-remove", model),
+    folder: () => ipcRenderer.invoke("local-ai-folder"),
+    show: () => ipcRenderer.invoke("local-ai-show"),
     generate: (id, request) => ipcRenderer.invoke("local-ai-generate", id, request),
     cancel: (id) => ipcRenderer.send("local-ai-cancel", id),
     onProgress: (listener) => ipcRenderer.on("local-ai-progress", (event, progress) => listener(progress)),

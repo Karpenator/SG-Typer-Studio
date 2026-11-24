@@ -282,6 +282,55 @@
     apply();
     save();
   };
+  // The rail's buttons are dragged up and down to arrange them, as the tools are: dropped above
+  // or below another one, the panel takes its place and stays there after a restart.
+  let railDrag = null;
+  // Set when a drag ends, so the click the browser sends after it changes no panel
+  let railJustMoved = false;
+  const moveInRail = (id, to) => {
+    const from = layout.rail.indexOf(id);
+    if (from < 0) return;
+    const at = layout.rail.indexOf(to);
+    if (at < 0 || at === from) return;
+    layout.rail.splice(from, 1);
+    layout.rail.splice(at, 0, id);
+    renderRail();
+    apply();
+    save();
+  };
+  const startRailDrag = (event, id) => {
+    if (event.button !== 0) return;
+    railDrag = { id, y: event.clientY, moved: false };
+    const move = (next) => {
+      if (!railDrag) return;
+      if (Math.abs(next.clientY - railDrag.y) > 3) railDrag.moved = true;
+      if (!railDrag.moved) return;
+      rail.classList.add("is-arranging");
+      const over = document.elementFromPoint(next.clientX, next.clientY);
+      const button = over && over.closest(".ws-rail__button");
+      rail.querySelectorAll(".ws-rail__button").forEach((item) => item.classList.toggle("is-drop", Boolean(button) && item === button && item.dataset.panel !== id));
+      event.preventDefault();
+    };
+    const stop = (next) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      rail.classList.remove("is-arranging");
+      rail.querySelectorAll(".ws-rail__button").forEach((item) => item.classList.remove("is-drop"));
+      const dragged = railDrag;
+      railDrag = null;
+      if (!dragged || !dragged.moved) return;
+      railJustMoved = true;
+      setTimeout(() => { railJustMoved = false; }, 0);
+      const over = document.elementFromPoint(next.clientX, next.clientY);
+      const button = over && over.closest(".ws-rail__button");
+      if (button && button.dataset.panel !== id) moveInRail(id, button.dataset.panel);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+    event.preventDefault();
+  };
   const renderRail = () => {
     rail.textContent = "";
     rail.setAttribute("aria-label", T("Collapsed panels"));
@@ -299,7 +348,9 @@
       button.setAttribute("aria-label", button.title);
       button.setAttribute("aria-expanded", String(open));
       button.innerHTML = RAIL_ICONS[id] || '<span class="ws-rail__letters">▦</span>';
-      button.addEventListener("click", () => toggleRail(id));
+      // A click opens or closes the panel; a drag that ended on this button only arranged the rail
+      button.addEventListener("click", () => { if (!railJustMoved) toggleRail(id); railJustMoved = false; });
+      button.addEventListener("pointerdown", (event) => startRailDrag(event, id));
       rail.appendChild(button);
     });
   };

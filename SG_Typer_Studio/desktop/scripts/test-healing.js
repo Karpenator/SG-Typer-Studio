@@ -91,7 +91,7 @@ test("Healing Brush is loaded before the raster engine and has its own UI identi
   const app = fs.readFileSync(path.join(root, "web", "app.js"), "utf8");
   assert.ok(app.includes('["healing", "Healing Brush", "Shift+S"]'));
   const css = fs.readFileSync(path.join(root, "web", "app.css"), "utf8");
-  assert.ok(css.includes('.stage[data-tool="healing"], .stage[data-tool="heal"] { cursor: none; }'), "Healing Brush hides the native cursor in favour of its ring");
+  assert.match(css, /\.stage\[data-tool="brush"\][\s\S]{0,200}data-tool="healing"[\s\S]{0,80}data-tool="smudge"\] \{ cursor: none; \}/, "the brushes and the Smudge tool hide the native cursor in favour of their ring");
   assert.ok(css.includes(".stage__over { position: absolute; z-index: 5;") && css.includes(".stamp-preview { position: absolute; z-index: 4;"), "the source texture cannot cover the brush outline");
   const russian = fs.readFileSync(path.join(root, "web", "strings", "ru.js"), "utf8");
   assert.ok(russian.includes('"Healing Brush": "Восстанавливающая кисть"'));
@@ -102,10 +102,23 @@ test("Healing Brush is loaded before the raster engine and has its own UI identi
   assert.ok(engine.includes("if (layer) applyHealingData(rasterEntry(layer, doc), live, data);"), "continuous movement displays completed exact frames instead of starving the live preview");
   assert.ok(engine.includes('!live.worker || typeof createImageBitmap === "undefined"'), "missing bitmap transfer support retains the synchronous fallback");
   assert.ok(engine.includes("op.healingSource = newCanvas(doc.width, doc.height);"), "source samples retain the original document coordinates for offset layers");
-  assert.ok(engine.includes('ctx.drawImage(op.healingResult, op.healingBox.left, op.healingBox.top);'), "History replays the compact result without solving again");
+  assert.ok(engine.includes("ctx.drawImage(op.healingResult, op.healingBox.left, op.healingBox.top);"), "History replays the compact result without solving again");
+  assert.ok(!/op.t === "stroke" && op.healingResult[\s\S]{0,400}globalCompositeOperation = "copy"/.test(engine), "a healing patch is drawn over the layer, never copy: undo must not empty the rest of it");
+  assert.ok(engine.includes("if (touched) {"), "a healing patch carries only the pixels its stroke changed");
   const worker = fs.readFileSync(path.join(root, "web", "healing-worker.js"), "utf8");
   assert.ok(worker.includes("seamlessClone(width, height, source, destination, mask, 4)"), "the worker uses the original RGBA full-stroke solver");
   assert.ok(worker.includes("new OffscreenCanvas"), "GPU pixel readback is isolated in the worker");
   assert.ok(engine.includes("createImageBitmap(frame.source"), "the UI thread transfers bitmaps instead of reading pixels synchronously");
   assert.ok(engine.includes("const prewarmHealing = () => getHealingWorker();"), "one worker is prewarmed and shared by later strokes");
+});
+
+test("Undo after two healing strokes apart restores the page, not a square of it", () => {
+  const engine = fs.readFileSync(path.join(__dirname, "..", "..", "web", "photoshop.js"), "utf8");
+  // The second stroke's patch is replayed over the first one's result. Drawn with "copy" it
+  // would erase everything outside its box, leaving the first patch's square blank.
+  const record = engine.slice(engine.indexOf("if (live.op.healing) {"), engine.indexOf("} else if (live.op.source) cropCloneSource(live.op);"));
+  assert.ok(record.includes("if (touched) {"), "the patch is kept only when the stroke changed something");
+  assert.ok(record.includes("patch.data[i] = 0;"), "pixels the stroke didn't reach stay transparent in the patch");
+  assert.ok(record.includes("live.base"), "the stroke is compared with the layer as it was before it");
+  assert.ok(engine.includes('ctx.globalCompositeOperation = op.atop ? "source-atop" : "source-over";'), "replaying heals paints over the layer, never copies onto it");
 });

@@ -23,7 +23,7 @@
     "rectangle", "ellipse", "lasso", "selectAll", "invert", "reselect", "grow", "nudgeSelection", "deselect",
     "toggleLayer", "setLayerProps", "moveLayers", "moveLayer", "newLayer", "newGroup", "duplicateLayers", "layerViaCopy",
     "groupLayers", "ungroupLayers", "deleteLayers", "reorderLayer", "reorderLayers", "newLayerBelow", "mergeDown",
-    "mergeSelected", "mergeGroup", "mergeVisible", "flatten", "rasterizeText", "selectLayerPixels", "replaceFonts",
+    "mergeSelected", "mergeGroup", "mergeVisible", "flatten", "rasterizeText", "rasterizeLayer", "selectLayerPixels", "replaceFonts",
     "addMask", "addVectorMask", "deleteMask", "applyMask", "setMaskProps", "invertMask", "maskToSelection", "moveMask",
     "transferMask", "rasterizeVectorMask", "toggleClipping", "clipToBelow", "toggleQuickMask", "fillMask", "fillSelection",
     "newText", "setText", "setTextStyle", "convertText", "setLineBreaks", "setTextVerticalAlign", "setTextAntiAlias",
@@ -31,7 +31,7 @@
   ]);
   const ID_ARGS = {
     transformLayers: { 0: "many" }, toggleLayer: { 0: "one" }, setLayerProps: { 0: "one" }, moveLayers: { 0: "many" }, moveLayer: { 0: "one" },
-    reorderLayer: { 0: "one", 1: "one" }, reorderLayers: { 0: "many", 1: "one" }, mergeGroup: { 0: "one" }, rasterizeText: { 0: "one" },
+    reorderLayer: { 0: "one", 1: "one" }, reorderLayers: { 0: "many", 1: "one" }, mergeGroup: { 0: "one" }, rasterizeText: { 0: "one" }, rasterizeLayer: { 0: "one" },
     selectLayerPixels: { 0: "one" }, addMask: { 1: "many" }, addVectorMask: { 1: "many" }, deleteMask: { 0: "one" }, applyMask: { 0: "one" },
     setMaskProps: { 0: "one" }, invertMask: { 0: "one" }, maskToSelection: { 0: "one" }, moveMask: { 0: "one" },
     transferMask: { 0: "one", 1: "one" }, rasterizeVectorMask: { 0: "one" }, clipToBelow: { 0: "one" }, fillMask: { 1: "one" },
@@ -44,7 +44,7 @@
     rectangle: "Rectangular Marquee", ellipse: "Elliptical Marquee", lasso: "Lasso", selectAll: "Select All", invert: "Inverse", reselect: "Reselect", grow: "Grow", nudgeSelection: "Move Selection", deselect: "Deselect",
     toggleLayer: "Layer Visibility", setLayerProps: "Layer Properties", moveLayers: "Move Layers", moveLayer: "Move Layer", newLayer: "New Layer", newGroup: "New Group", duplicateLayers: "Duplicate Layers", layerViaCopy: "Layer Via Copy",
     groupLayers: "Group Layers", ungroupLayers: "Ungroup Layers", deleteLayers: "Delete Layers", reorderLayer: "Reorder Layer", reorderLayers: "Reorder Layers", newLayerBelow: "New Layer Below", mergeDown: "Merge Down",
-    mergeSelected: "Merge Layers", mergeGroup: "Merge Group", mergeVisible: "Merge Visible", flatten: "Flatten Image", rasterizeText: "Rasterize Type", selectLayerPixels: "Select Layer Pixels", replaceFonts: "Replace Fonts",
+    mergeSelected: "Merge Layers", mergeGroup: "Merge Group", mergeVisible: "Merge Visible", flatten: "Flatten Image", rasterizeText: "Rasterize Type", rasterizeLayer: "Rasterize Layer", selectLayerPixels: "Select Layer Pixels", replaceFonts: "Replace Fonts",
     addMask: "Add Layer Mask", addVectorMask: "Add Vector Mask", deleteMask: "Delete Mask", applyMask: "Apply Mask", setMaskProps: "Mask Properties", invertMask: "Invert Mask", maskToSelection: "Mask To Selection", moveMask: "Move Mask",
     transferMask: "Transfer Mask", rasterizeVectorMask: "Rasterize Vector Mask", toggleClipping: "Clipping Mask", clipToBelow: "Clipping Mask", toggleQuickMask: "Quick Mask", fillMask: "Fill Mask", fillSelection: "Fill",
     newText: "Type Tool", setText: "Edit Text", setTextStyle: "Text Style", convertText: "Convert Text", setLineBreaks: "Line Breaks", setTextVerticalAlign: "Vertical Alignment", setTextAntiAlias: "Anti-Alias",
@@ -157,13 +157,19 @@
     });
   };
   const strokeLabel = (fields) => fields.smudge ? "Smudge" : fields.healing ? "Healing Brush" : fields.clone ? "Clone Stamp" : fields.erase ? "Eraser" : fields.target ? "Mask Brush" : "Brush";
-  const capture = (method, args) => {
+  const capture = (method, args, encoded) => {
     const action = recordingAction();
     if (!action || playing || !METHODS.has(method)) return;
     try {
-      action.steps.push({ method, args: encodeArgs(method, args), label: LABELS[method] || method, enabled: true });
+      // Refs taken before the command ran: a rename must not record the layer under its new name
+      action.steps.push({ method, args: encoded || encodeArgs(method, args), label: LABELS[method] || method, enabled: true });
       save(); render();
     } catch (error) { unsupported(error); }
+  };
+  // The layers a command names, read before it changes them: the step must find them afterwards
+  const encodeEarly = (method, args) => {
+    if (!ID_ARGS[method]) return null;
+    try { return encodeArgs(method, args); } catch (error) { unsupported(error); return null; }
   };
   const captureStroke = () => {
     const action = recordingAction();
@@ -182,12 +188,15 @@
       const original = PS.ops[method];
       if (typeof original !== "function") return;
       PS.ops[method] = function (...args) {
+        // Rename Layer, Move Layers and the like change the very layer an action step looks up:
+        // its ref is taken here, while the layer still has the name and the place it is given by
+        const early = !playing && recordingAction() ? encodeEarly(method, args) : null;
         opDepth++;
         let result;
         try { result = original.apply(this, args); }
         finally { opDepth--; }
         // A composite op may call another recordable op. Only the outer command is a step.
-        if (!opDepth && recordingAction() && !playing && result !== false && !(result && typeof result.then === "function")) capture(method, args);
+        if (!opDepth && recordingAction() && !playing && result !== false && !(result && typeof result.then === "function")) capture(method, args, early);
         return result;
       };
     });

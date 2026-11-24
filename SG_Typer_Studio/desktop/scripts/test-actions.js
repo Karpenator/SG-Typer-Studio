@@ -43,3 +43,24 @@ test("Actions and the two independent New Style options are localized", () => {
     }
   }
 });
+
+test("A recorded rename finds its layer by the name it had, not the one it is given", () => {
+  const actions = read("web/actions.js");
+  // The refs are read before the command runs: after a rename the old name is gone
+  assert.ok(actions.includes("const early = !playing && recordingAction() ? encodeEarly(method, args) : null;"), "recording reads the layer refs before the command changes them");
+  assert.ok(actions.includes("capture(method, args, early)") && actions.includes("args: encoded || encodeArgs(method, args)"), "the step keeps the refs taken before the change");
+  assert.ok(actions.includes("rasterizeLayer: { 0: \"one\" }"), "Rasterize Layer records the layer it rasterizes");
+  assert.ok(actions.includes("rasterizeLayer: \"Rasterize Layer\""));
+});
+
+test("Rasterize Layer turns a text or an SFX into its pixels, as Photoshop's does", () => {
+  const photoshop = read("web/photoshop.js");
+  assert.ok(photoshop.includes("rasterizeLayer(id) {"), "the engine has Rasterize Layer");
+  assert.ok(photoshop.includes("rasterizeText(id) {\n      return ops.rasterizeLayer(id);"), "Rasterize Type shares the same step");
+  assert.ok(photoshop.includes('item.kind === "text");'), "only a text has pixels to be made of");
+  assert.ok(!photoshop.includes('const visual = visualOf(layer, doc);\n      if (!visual || !visual.canvas'), "a folder is merged, not rasterized");
+  assert.ok(photoshop.includes('commitState(doc, "Rasterize Layer"'), "it is one undoable step");
+  const app = read("web/app.js");
+  assert.ok(app.includes('{ label: "Rasterize Layer", keys: "Shift+Cmd+Y"'), "Layer > Rasterize Layer");
+  assert.ok(app.includes('"Rasterize Type", "Rasterize Layer", null, "Convert to SFX"'), "the layer menu has it too");
+});

@@ -1696,7 +1696,9 @@
     } else if (op.t === "stroke" && op.healingResult) {
       // The live segments already produced the final pixels. Replaying this small patch is
       // immediate and exact; solving the whole stroke again would only make History slow.
-      ctx.globalCompositeOperation = "copy";
+      // Over, never copy: copy would empty every pixel of the layer outside the patch, and with
+      // two strokes apart, undo would leave the first one's square blank.
+      ctx.globalCompositeOperation = op.atop ? "source-atop" : "source-over";
       ctx.drawImage(op.healingResult, op.healingBox.left, op.healingBox.top);
     } else if (op.t === "stroke" && op.source) {
       const box = strokeBox(op.points, op.size);
@@ -8064,11 +8066,19 @@
       commitState(doc, "Flatten Image", { layers: [background], activeIds: [background.id] });
     },
     rasterizeText(id) {
+      return ops.rasterizeLayer(id);
+    },
+    // Rasterize Layer, as Photoshop's: a text is no longer editable and is its pixels, on the
+    // page where it stands. Effects, stroke and fill are drawn in; the mask stays a mask.
+    // Everything else is already pixels: a pixel layer, a group, a curve. Photoshop's own
+    // Rasterize Layer exists for vectors, and a folder is merged rather than rasterized.
+    rasterizeLayer(id) {
       const doc = app.doc;
       const layer = doc && doc.state.layers.find((item) => item.id === id && item.kind === "text");
-      if (!layer) return;
+      if (!layer) return false;
       const raster = newRaster(layer.name, { group: layer.group, opacity: layer.opacity, blend: layer.blend, visible: layer.visible, clipping: layer.clipping, mask: layer.mask || null, vectorMask: layer.vectorMask || null, bitmap: flattenLayers(doc, [Object.assign({}, layer, { opacity: 1, blend: "normal", mask: null, vectorMask: null })]) });
       commitState(doc, "Rasterize Layer", { layers: doc.state.layers.map((item) => (item.id === id ? raster : item)), activeIds: [raster.id] });
+      return true;
     },
     /* ---- masks ---- */
     // What the brushes work on: the active layer's pixel or vector mask when its thumbnail is
@@ -8722,8 +8732,26 @@
           const box = strokeBox(live.op.points, live.op.size);
           const result = newCanvas(box.width, box.height);
           result.getContext("2d").drawImage(entry.canvas, box.left - entry.cx0, box.top - entry.cy0, box.width, box.height, 0, 0, box.width, box.height);
-          live.op.healingResult = result;
-          live.op.healingBox = box;
+          // History replays it over the layer as it was before the stroke, so it carries only
+          // what this stroke laid: each pixel keeps the healed colour where the stroke reached,
+          // and is left transparent where it didn't. Painted over another stroke, the square's
+          // untouched part would otherwise bring the old pixels back.
+          const before = newCanvas(box.width, box.height);
+          if (live.base) before.getContext("2d").drawImage(live.base, box.left - entry.cx0, box.top - entry.cy0, box.width, box.height, 0, 0, box.width, box.height);
+          const clean = result.getContext("2d", { willReadFrequently: true });
+          const patch = clean.getImageData(0, 0, box.width, box.height);
+          const older = before.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, box.width, box.height);
+          let touched = false;
+          for (let i = 3; i < patch.data.length; i += 4) {
+            if (patch.data[i] === older.data[i] && patch.data[i - 1] === older.data[i - 1] && patch.data[i - 2] === older.data[i - 2] && patch.data[i - 3] === older.data[i - 3]) patch.data[i] = 0;
+            else touched = true;
+          }
+          // Nothing of this stroke shows in its box: no step for History to replay
+          if (touched) {
+            clean.putImageData(patch, 0, 0);
+            live.op.healingResult = result;
+            live.op.healingBox = box;
+          }
         }
         delete live.op.healingSource;
         delete live.op.healingDestination;

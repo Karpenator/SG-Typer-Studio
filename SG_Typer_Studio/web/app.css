@@ -237,7 +237,7 @@ input[type="range"]:disabled::-moz-range-thumb { background: var(--muted); }
 .stage.is-panning { cursor: grabbing; }
 .stage.is-spacing.is-marquee { cursor: move; }
 .stage[data-tool="zoom"] { cursor: zoom-in; }
-.stage[data-tool="brush"], .stage[data-tool="eraser"], .stage[data-tool="stamp"], .stage[data-tool="healing"], .stage[data-tool="heal"] { cursor: none; }
+.stage[data-tool="brush"], .stage[data-tool="eraser"], .stage[data-tool="stamp"], .stage[data-tool="healing"], .stage[data-tool="heal"], .stage[data-tool="smudge"] { cursor: none; }
 .stage[data-tool="gradient"] { cursor: crosshair; }
 /* Held, Ctrl or Cmd with Space wins over what the tool shows, the brush's ring as well */
 .stage.is-zoom-hold { cursor: zoom-in !important; }
@@ -834,6 +834,9 @@ body.is-dragging-tool, body.is-dragging-tool * { cursor: grabbing !important; }
 .ws-rail__button .ws-rail__letters { font-size: 12px; font-weight: 650; letter-spacing: -0.04em; }
 .ws-rail__button[data-panel="color"] { background: conic-gradient(#f44, #ff4, #4f6, #4df, #54f, #e4f, #f44); color: #fff; }
 .ws-rail__button[data-panel="color"]::after { content: ""; width: 15px; height: 15px; border: 2px solid #fff; border-radius: 50%; background: var(--ui-dark); }
+.ws-rail__button { cursor: grab; }
+.ws-rail.is-arranging .ws-rail__button { cursor: grabbing; }
+.ws-rail__button.is-drop { border-color: var(--blue); box-shadow: inset 0 2px 0 var(--blue); }
 .pane.is-rail-flyout { z-index: 31 !important; outline: 1px solid var(--line); border-radius: 3px; box-shadow: -8px 8px 24px rgba(0, 0, 0, 0.5); }
 .is-rail-flyout > .ws-grip { display: block; }
 
@@ -1027,6 +1030,8 @@ input[type="range"].color-panel__hue:hover::-moz-range-thumb, input[type="range"
 .gensettings__models li { display: flex; align-items: center; gap: 8px; padding: 3px 4px 3px 10px; background: var(--ui-dark); border-radius: 5px; }
 .gensettings__models span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 .gensettings__models small { color: var(--muted); }
+.gensettings__local { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.gensettings__path { padding: 1px 5px; border-radius: 4px; background: var(--ui-dark); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; overflow-wrap: anywhere; }
 .gensettings__add { display: flex; gap: 6px; }
 .modal--settings .modal__body .gensettings__add select { flex: none; width: 120px; }
 .gensettings__add input { flex: 1; min-width: 0; }

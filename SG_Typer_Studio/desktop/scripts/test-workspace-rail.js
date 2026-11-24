@@ -31,12 +31,15 @@ class Element {
     this.listeners = {};
     this.attributes = {};
     this.hidden = false;
-    this.textContent = "";
+    this._text = "";
     this.clientWidth = id === "work" ? 1400 : 0;
     this.clientHeight = id === "work" ? 900 : 0;
     this.offsetWidth = 300;
     this.offsetHeight = 250;
   }
+  // As in the DOM, an emptied text node takes the children with it: the rail is rebuilt that way
+  get textContent() { return this._text; }
+  set textContent(value) { this._text = String(value); if (value === "") this.children = []; }
   set className(value) { this.classList = new Classes(); value.split(/\s+/).filter(Boolean).forEach((name) => this.classList.add(name)); }
   get className() { return [...this.classList.values].join(" "); }
   get firstChild() { return this.children[0] || null; }
@@ -113,10 +116,12 @@ function workspace(saved) {
     addEventListener: (type, listener) => { (listeners[type] ||= []).push(listener); },
     removeEventListener: (type, listener) => { listeners[type] = (listeners[type] || []).filter((item) => item !== listener); },
   };
-  const document = { getElementById: (id) => elements[id] || null, createElement: (tag) => new Element(tag) };
+  const document = { getElementById: (id) => elements[id] || null, createElement: (tag) => new Element(tag), elementFromPoint: () => null };
+  window.document = document;
   const context = {
     window, document, console,
     ResizeObserver: class { observe() {} },
+    setTimeout: (fn) => { fn(); return 1; },
     requestAnimationFrame: () => 1,
     cancelAnimationFrame() {},
     TypeRShell: { touch: false, onChange() {} },
@@ -125,7 +130,7 @@ function workspace(saved) {
   vm.runInNewContext(source, context);
   window.TypeRWorkspace.init((text) => text);
   return {
-    window, elements, listeners,
+    window, elements, listeners, document,
     saved: () => JSON.parse(storage.get("typer.web.layout")),
     clickRail(id) {
       const rail = elements.work.children.find((item) => item.id === "workspace-rail");
@@ -217,4 +222,22 @@ test("Dragging a docked Color panel to the rail removes its old dock and opens i
   assert.ok(!saved.floating.color);
   assert.ok(panel.classList.contains("is-rail-flyout"));
   assert.equal(panel.hidden, false);
+});
+
+test("Rail buttons are dragged up and down to arrange them, and that order is saved", () => {
+  const run = workspace();
+  const rail = run.elements.work.children.find((item) => item.id === "workspace-rail");
+  const buttons = rail.children;
+  assert.deepEqual(buttons.map((item) => item.dataset.panel), ["styles", "brushes", "actions", "sfx", "breaks", "history"]);
+  const from = buttons.find((item) => item.dataset.panel === "breaks");
+  const to = buttons.find((item) => item.dataset.panel === "styles");
+  // The rail button under the pointer is what a drop lands on
+  run.window.document.elementFromPoint = () => to;
+  from.fire("pointerdown", { button: 0, clientX: 1400, clientY: from.offsetTop + 5, preventDefault() {} });
+  for (const listener of run.listeners.pointermove || []) listener({ clientX: 1400, clientY: to.offsetTop + 5, preventDefault() {} });
+  for (const listener of run.listeners.pointerup || []) listener({ clientX: 1400, clientY: to.offsetTop + 5 });
+  const saved = run.saved();
+  assert.deepEqual(saved.rail, ["breaks", "styles", "brushes", "actions", "sfx", "history"]);
+  assert.equal(saved.railOpen, null, "arranging the rail opens no panel");
+  assert.deepEqual(rail.children.map((item) => item.dataset.panel), saved.rail, "the buttons follow the saved order");
 });

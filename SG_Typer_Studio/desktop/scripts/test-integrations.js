@@ -426,3 +426,22 @@ test("Generate goes to the model again when a plain, white area is selected afte
   assert.ok(!source.includes('fillPlainAreas(doc, plain, "Generative Fill")'), "Generate must never paint the selection on TypeR Clean");
   assert.ok(source.includes('if (plain.length) fillPlainAreas(doc, plain, "Remove Text");'), "Remove Text keeps filling plain backgrounds at once");
 });
+
+test("the local model settings say where the models go and open that folder", async () => {
+  const localAI = read("desktop/src/local-ai.js");
+  assert.ok(localAI.includes('folder: root(),'), "the status carries the folder");
+  assert.ok(localAI.includes('process.env.TYPER_LOCAL_AI_DIR || path.join(app.getPath("userData"), "local-ai")'), "the folder can be moved to another disk");
+  const main = read("desktop/src/main.js");
+  assert.ok(main.includes('ipcMain.handle("local-ai-folder"') && main.includes('ipcMain.handle("local-ai-show"'), "the app answers with the path and opens it");
+  assert.ok(main.includes("await shell.openPath(folder)"));
+  assert.ok(read("desktop/src/preload.js").includes('folder: () => ipcRenderer.invoke("local-ai-folder")'));
+  assert.ok(read("desktop/src/preload.js").includes('show: () => ipcRenderer.invoke("local-ai-show")'));
+  const source = read("web/generative.js");
+  const window = { localStorage: { getItem: () => null, setItem: () => {} }, dispatchEvent: () => {}, TypeRDesktop: { localAI: { onProgress: () => {}, folder: async () => "D:/AI/local-ai", show: async () => true } } };
+  const context = { window, localStorage: window.localStorage, console, URL, CustomEvent: function () {}, setTimeout, clearTimeout, FormData, Blob, atob, DOMException, fetch: async () => { throw new Error("no"); } };
+  vm.runInNewContext(source, context);
+  assert.equal(await window.TypeRGenerative.localFolder(), "D:/AI/local-ai");
+  assert.equal(await window.TypeRGenerative.localShowFolder(), true);
+  const app = read("web/app.js");
+  assert.ok(app.includes('T("Installed in:")') && app.includes('T("Open Folder")'), "the settings show the path with a way to open it");
+});
