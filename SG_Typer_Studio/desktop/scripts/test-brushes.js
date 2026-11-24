@@ -108,3 +108,43 @@ test("The brush ring reads on a light page and on a dark one", () => {
   const hidden = app.match(/ui\.brushRing\.setAttribute\("hidden"/g) || [];
   assert.equal(hidden.length, 0, "every hide goes through hideBrushRing, so no lone ring stays");
 });
+
+test("Every identifier the pointer code names is declared, and declared before it is first used", () => {
+  const app = read("web/app.js");
+  // BRUSHING_TOOLS was used but never declared: every move threw, and no tool had a cursor
+  assert.ok(app.includes("const BRUSHING_TOOLS = new Set([\"brush\", \"eraser\", \"stamp\", \"healing\", \"heal\", \"smudge\"]);"), "the brushing tools are declared once");
+  const declared = app.indexOf("const BRUSHING_TOOLS =");
+  const isSampling = app.indexOf("const isSampling =");
+  const firstRead = app.indexOf("BRUSHING_TOOLS.has(");
+  assert.ok(declared > 0 && declared < firstRead, "it is declared before the code that asks about it");
+  // isSampling only names it when called, which is long after both: a const in a function body is
+  // read at call time, so the arrow function there is fine.
+  assert.ok(isSampling > 0, "the sampling rule is a function, not a value read at load");
+  // The helpers the pointer handlers call must exist too
+  for (const helper of ["const placeBrushRing =", "const hideBrushRing =", "const showBrushAtPointer =", "const setStageCursor =", "let cursorSet"]) {
+    assert.ok(app.includes(helper), `${helper} exists`);
+  }
+  // Nothing may be named without being declared anywhere: a bare use is a ReferenceError on every
+  // event, which reads as a dead pointer rather than as a broken line
+  for (const name of ["BRUSHING_TOOLS", "cursorSet", "brushAt", "hoverAt"]) {
+    assert.ok(new RegExp(`(const|let|var)\\s+${name}\\b`).test(app), `${name} is declared`);
+  }
+});
+
+test("A brush's pointer is hidden only by the ring that is drawn in its place", () => {
+  const app = read("web/app.js");
+  const css = read("web/app.css");
+  // The tool's own class must not say cursor:none: that hid the pointer and left it to the ring,
+  // and a ring that never came left nothing at all
+  const brushes = ['brush', 'eraser', 'stamp', 'healing', 'heal', 'smudge'];
+  const toolRule = css.split("\n").find((line) => brushes.every((tool) => line.includes(`[data-tool="${tool}"]`)) || (/data-tool="brush"/.test(line) && line.includes("cursor")));
+  assert.ok(toolRule, "the brushing tools have a rule");
+  assert.ok(!/cursor:\s*none/.test(toolRule), `the brush tool shows a crosshair, not nothing: ${toolRule.trim()}`);
+  assert.ok(/cursor:\s*crosshair/.test(toolRule), "and it is visible");
+  // Hiding the pointer goes with the ring: the same class that draws it takes it away
+  assert.ok(/\.stage\.is-ring \{ cursor: none; \}/.test(css), "is-ring hides the pointer");
+  assert.ok(app.includes('ui.stage.classList.toggle("is-ring", drawn);'), "the ring turns it on when it is drawn");
+  assert.ok(/const hideBrushRing = \(\) => \{[\s\S]{0,220}?classList\.remove\("is-ring"\)/.test(app), "and off when it goes");
+  // A hidden ring leaves a visible pointer: place and hide stay together
+  assert.ok(/const hideBrushRing[\s\S]{0,220}?remove\("is-ring"\)/.test(app), "hiding the ring puts the pointer back");
+});

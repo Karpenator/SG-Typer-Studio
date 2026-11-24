@@ -237,7 +237,11 @@ input[type="range"]:disabled::-moz-range-thumb { background: var(--muted); }
 .stage.is-panning { cursor: grabbing; }
 .stage.is-spacing.is-marquee { cursor: move; }
 .stage[data-tool="zoom"] { cursor: zoom-in; }
-.stage[data-tool="brush"], .stage[data-tool="eraser"], .stage[data-tool="stamp"], .stage[data-tool="healing"], .stage[data-tool="heal"], .stage[data-tool="smudge"] { cursor: none; }
+/* The brush shows a crosshair, and hides the pointer only while its own ring is drawn over it
+   (is-ring, put there by the ring itself). The pointer is never taken away in the hope that a
+   ring will come: a ring that fails to arrive used to leave no cursor at all. */
+.stage[data-tool="brush"], .stage[data-tool="eraser"], .stage[data-tool="stamp"], .stage[data-tool="healing"], .stage[data-tool="heal"], .stage[data-tool="smudge"] { cursor: crosshair; }
+.stage.is-ring { cursor: none; }
 .stage[data-tool="gradient"] { cursor: crosshair; }
 /* Held, Ctrl or Cmd with Space wins over what the tool shows, the brush's ring as well */
 .stage.is-zoom-hold { cursor: zoom-in !important; }

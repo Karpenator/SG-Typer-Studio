@@ -91,7 +91,10 @@ test("Healing Brush is loaded before the raster engine and has its own UI identi
   const app = fs.readFileSync(path.join(root, "web", "app.js"), "utf8");
   assert.ok(app.includes('["healing", "Healing Brush", "Shift+S"]'));
   const css = fs.readFileSync(path.join(root, "web", "app.css"), "utf8");
-  assert.match(css, /\.stage\[data-tool="brush"\][\s\S]{0,200}data-tool="healing"[\s\S]{0,80}data-tool="smudge"\] \{ cursor: none; \}/, "the brushes and the Smudge tool hide the native cursor in favour of their ring");
+  // The brushes show a crosshair and hide it only while their ring is drawn (is-ring): hiding it by
+  // the tool alone left a page with no cursor on it when the ring did not come
+  assert.match(css, /\.stage\[data-tool="brush"\][\s\S]{0,220}data-tool="healing"[\s\S]{0,80}data-tool="smudge"\] \{ cursor: crosshair; \}/, "the brushes and the Smudge tool show a pointer of their own");
+  assert.ok(css.includes(".stage.is-ring { cursor: none; }"), "and the ring, when drawn, takes it away");
   assert.ok(css.includes(".stage__over { position: absolute; z-index: 5;") && css.includes(".stamp-preview { position: absolute; z-index: 4;"), "the source texture cannot cover the brush outline");
   const russian = fs.readFileSync(path.join(root, "web", "strings", "ru.js"), "utf8");
   assert.ok(russian.includes('"Healing Brush": "Восстанавливающая кисть"'));

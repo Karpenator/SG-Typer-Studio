@@ -6539,6 +6539,10 @@
     return Object.assign(shape, tool === "eraser" ? { erase: true } : { color: toRgb(app.fg) });
   };
 
+  // Every tool that paints with the brush's shape and its ring. Declared before anything asks
+  // about it: showBrushAtPointer runs long before the sampling code below, and naming a const
+  // declared after it would throw on every move and leave the pointer with no face at all.
+  const BRUSHING_TOOLS = new Set(["brush", "eraser", "stamp", "healing", "heal", "smudge"]);
   // Ctrl and Alt together with the right button, as in Photoshop (Windows and Mac alike: a Mac's
   // Control-click is one button, so Option alone stays on Alt + right-drag): the brush shows where
   // it was pressed, in red. Sideways is its size, its edge following the pointer. Down makes it
@@ -6547,6 +6551,7 @@
   const isBrushAdjust = (event) => (event.button === 2 && event.altKey && (event.ctrlKey || event.metaKey)) || (IS_MAC && event.button === 0 && event.ctrlKey && event.altKey);
   // Alt turns the brush into the eyedropper while it is held, except during what it is already
   // doing. With Ctrl or Cmd too, the brush resize has it first, so no eyedropper is left behind.
+  // The Clone Stamp and the Healing Brush keep Alt for their source: it is never sampling there.
   const isSampling = (event) => (Boolean(sampleColorForPicker) && !spacing) || ((app.tool === "brush" || app.tool === "gradient") && event.altKey && !event.ctrlKey && !event.metaKey && !spacing);
   // Ctrl or Cmd sets the wand aside for as long as it is held: a click on a text edits it, a drag
   // moves it, and nothing gets selected.
@@ -6561,24 +6566,29 @@
   // Where the pointer last was, in the stage's own pixels: [ to ] draws the new size there at
   // once, without waiting for the next move
   let brushAt = null;
-  // The brush ring at the pointer, at the size and hardness it has now
   // The ring is drawn twice: a dark under-stroke and a white one over it, so it shows on a light
-  // page and on a dark one. Both circles are placed, shown and hidden together.
+  // page and on a dark one. Both circles are placed, shown and hidden together, and it follows
+  // the pointer at the size the brush has now.
   const placeBrushRing = (x, y, radius) => {
+    let drawn = false;
     [ui.brushRingUnder, ui.brushRing].forEach((ring) => {
       if (!ring) return;
       ring.setAttribute("cx", x);
       ring.setAttribute("cy", y);
       ring.setAttribute("r", radius);
       ring.removeAttribute("hidden");
+      drawn = true;
     });
+    // The pointer itself is hidden by the ring being there, not by the tool: a ring that did not
+    // arrive leaves the crosshair in place rather than an empty page with no cursor on it.
+    ui.stage.classList.toggle("is-ring", drawn);
   };
   const hideBrushRing = () => {
     [ui.brushRing, ui.brushRingUnder].forEach((ring) => ring && ring.setAttribute("hidden", ""));
+    ui.stage.classList.remove("is-ring");
   };
   const showBrushAtPointer = () => {
-    const tools = BRUSHING_TOOLS;
-    if (!brushAt || !tools.has(app.tool) || !app.doc || gesture || !ui.editor.hidden) return;
+    if (!brushAt || !BRUSHING_TOOLS.has(app.tool) || !app.doc || gesture || !ui.editor.hidden) return;
     placeBrushRing(brushAt[0], brushAt[1], Math.max(1, (app.brush.size / 2) * view().zoom));
   };
   const ADAPTIVE_CURSOR_TOOLS = new Set(["wand", "magicEraser", "clean", "rectangle", "ellipse", "lasso", "polygon", "crop", "gradient"]);
