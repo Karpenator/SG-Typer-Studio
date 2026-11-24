@@ -277,7 +277,11 @@ input[type="range"]:disabled::-moz-range-thumb { background: var(--muted); }
 .reshape-frame { fill: none; stroke: var(--blue); stroke-width: 1px; shape-rendering: crispEdges; opacity: 0.6; }
 .warp-grid { fill: none; stroke: var(--blue); stroke-width: 1px; opacity: 0.45; }
 .handle__plus { stroke: #d32f2f; stroke-width: 1px; shape-rendering: crispEdges; }
-.brush-ring { fill: none; stroke: #fff; stroke-width: 1px; mix-blend-mode: difference; }
+/* A ring that reads on any page: a dark line under a white one, so a light page shows the dark
+   stroke and a dark page the white. Difference blending alone vanished on white and on the
+   stage's grey alike. */
+.brush-ring { fill: none; stroke: #fff; stroke-width: 1.4px; }
+.brush-ring--under { stroke: rgba(0, 0, 0, 0.62); stroke-width: 3px; }
 /* The source texture sits below the SVG brush ring and handles, never over the cursor outline. */
 .stamp-preview { position: absolute; z-index: 4; border-radius: 50%; transform: translate(-50%, -50%); opacity: 0.85; pointer-events: none; }
 .stamp-mark { fill: none; stroke: #fff; stroke-width: 1px; mix-blend-mode: difference; shape-rendering: crispEdges; }
@@ -1032,6 +1036,10 @@ input[type="range"].color-panel__hue:hover::-moz-range-thumb, input[type="range"
 .gensettings__models small { color: var(--muted); }
 .gensettings__local { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .gensettings__path { padding: 1px 5px; border-radius: 4px; background: var(--ui-dark); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; overflow-wrap: anywhere; }
+.gensettings__folder { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; margin-top: 4px; }
+.gensettings__folder-buttons { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.gensettings__room { color: var(--muted); font-size: 11px; }
+.gensettings__room.is-tight { color: #f28b82; }
 .gensettings__add { display: flex; gap: 6px; }
 .modal--settings .modal__body .gensettings__add select { flex: none; width: 120px; }
 .gensettings__add input { flex: 1; min-width: 0; }

@@ -68,3 +68,43 @@ test("Current Layer Smudge avoids an unused snapshot and repeated post-dab readb
   assert.ok(engine.includes("const distanceSquared = dx * dx + dy * dy"));
   assert.ok(!engine.includes('const shot = cloneSource(doc, layer, smudge.sampleAll ? "all" : "current")'));
 });
+
+test("Ctrl + Alt + right-drag resizes the brush and is never a lent Move or a stuck eyedropper", () => {
+  const app = read("web/app.js");
+  // Ctrl + Alt with the right button belongs to the brush: the Move tool is not lent then
+  assert.ok(app.includes("const moveLent = (event) => LENDS_MOVE.has(app.tool) && (IS_MAC ? event.metaKey : event.ctrlKey) && !event.altKey"), "Ctrl + Alt is not Ctrl alone");
+  // The resize is decided before the lent tool, before the text's handles and before the
+  // right button is dropped as an unknown one
+  const resize = app.indexOf("const brushResize = !isFinger(event) && event.pointerType !== \"pen\"");
+  const lent = app.indexOf("const lent = !brushResize");
+  const unknownButton = app.indexOf("if (event.button !== 0) return;", resize);
+  assert.ok(resize > 0 && lent > resize && unknownButton > lent, "the brush's own gesture comes first");
+  const branch = app.indexOf('&& brushResize) {', resize);
+  assert.ok(branch > 0 && branch < unknownButton, "the brush adjust branch runs before the button gate");
+  // After the gesture, the ring is the brush's: no eyedropper class is left on the page
+  const finish = app.indexOf('} else if (kind === "brushAdjust") {');
+  const tail = app.slice(finish, finish + 700);
+  assert.ok(tail.includes('ui.stage.classList.remove("is-sampling")'), "the eyedropper goes when the drag ends");
+  assert.ok(tail.includes("showBrushAtPointer()"), "the ring comes back where the pointer is");
+  // The colour picker's eyedropper goes with its window, which closes without a key being let go
+  const picker = app.indexOf("if (closeColorPicker) closeColorPicker(true);", 400);
+  assert.ok(picker > 0);
+  assert.ok(app.includes("frame = 0;\n      sampleColorForPicker = null;"), "the picker clears its sampling when it closes");
+  // Alt on a brush is the eyedropper with the ring hidden, and let go it is the ring again
+  assert.ok(app.includes('if (isSampling(event)) hideBrushRing();\n      else showBrushAtPointer();'), "Alt hides the ring, letting go brings it back");
+  // The icon is an inline style: it must be taken off when Alt is let go, or no class can win
+  assert.ok(app.includes("let cursorSet = \"\";") && app.includes("const setStageCursor = (value) =>"), "the stage's cursor is put on and taken off in one place");
+  assert.ok(app.includes('if (cursorSet && BRUSHING_TOOLS.has(app.tool)) setStageCursor("");'), "letting go of Alt takes the eyedropper icon off the brush");
+});
+
+test("The brush ring reads on a light page and on a dark one", () => {
+  const app = read("web/app.js");
+  const css = read("web/app.css");
+  const html = read("web/index.html");
+  assert.ok(html.includes('class="brush-ring brush-ring--under" id="brush-ring-under"'), "a dark under-stroke under the white ring");
+  assert.ok(app.includes("const placeBrushRing = (x, y, radius) =>") && app.includes("const hideBrushRing = () =>"), "both circles move and hide together");
+  assert.ok(!/mix-blend-mode: difference/.test(css.slice(css.indexOf(".brush-ring {"), css.indexOf(".brush-ring {") + 200)), "difference blending alone vanished on white");
+  assert.ok(css.includes(".brush-ring--under { stroke: rgba(0, 0, 0, 0.62); stroke-width: 3px; }"), "the dark stroke is the contrast on a light page");
+  const hidden = app.match(/ui\.brushRing\.setAttribute\("hidden"/g) || [];
+  assert.equal(hidden.length, 0, "every hide goes through hideBrushRing, so no lone ring stays");
+});

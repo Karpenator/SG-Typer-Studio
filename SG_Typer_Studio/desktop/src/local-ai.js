@@ -44,7 +44,23 @@ const MEMORY = 15 * 1024 ** 3;
 const enoughMemory = os.totalmem() >= MEMORY;
 
 const engine = ENGINES[process.platform] || null;
-const root = () => process.env.TYPER_LOCAL_AI_DIR || path.join(app.getPath("userData"), "local-ai");
+// A saved settings file, if any; the settings dialog returns its path in a different module
+const settingsFile = () => path.join(app.getPath("userData"), "local-ai.json");
+let chosen = null;
+const savedFolder = () => {
+  if (chosen !== null) return chosen;
+  try {
+    const saved = JSON.parse(fs.readFileSync(settingsFile(), "utf8"));
+    chosen = saved && typeof saved.folder === "string" && saved.folder.trim() ? saved.folder : "";
+  } catch (error) {
+    chosen = "";
+  }
+  return chosen;
+};
+// Where the engine and the models are: the folder picked in the settings, else the environment
+// variable, else the app's own folder. Everything below reads it, so picking another folder
+// moves what is downloaded from then on; a model already somewhere else is downloaded again.
+const root = () => savedFolder() || process.env.TYPER_LOCAL_AI_DIR || path.join(app.getPath("userData"), "local-ai");
 const engineDir = () => path.join(root(), "engine");
 const filePath = (key) => path.join(root(), "models", FILES[key].name);
 // A file is kept once checked: its mark says so, so it isn't hashed again at every start
@@ -71,8 +87,11 @@ const missing = (model) => {
 const status = () => ({
   available: Boolean(engine) && enoughMemory,
   memory: enoughMemory,
-  // Where the models and the engine are kept, so the settings can say it and open it
+  // Where the models and the engine are kept, so the settings can say it and open it, and
+  // whether that place was picked here or comes from the app or the environment
   folder: root(),
+  folderSet: Boolean(savedFolder()),
+  defaultFolder: path.join(app.getPath("userData"), "local-ai"),
   models: Object.fromEntries(Object.keys(MODELS).map((model) => [model, { installed: installed(model), download: missing(model), size: filesOf(model).reduce((sum, key) => sum + FILES[key].size, 0) + (engine ? engine.size : 0) }])),
 });
 
@@ -396,4 +415,110 @@ process.on("exit", () => {
 // Left by the last session, if it ended badly
 if (engine) app.whenReady().then(killLeftover).catch(() => {});
 
-module.exports = { status, install, remove, generate, stopServer, folder: root, LocalError };
+/* ------------------------------------ where they go -------------------------------- */
+
+// A model takes 5 to 6 GB: the first drive is rarely the roomy one. Changing the folder stops
+// the engine first (it runs from that folder) and then leaves every download to the new one.
+const setFolder = async (folder) => {
+  const next = typeof folder === "string" ? folder.trim() : "";
+  if (next && !path.isAbsolute(next)) throw new LocalError("other", "The folder must be a full path, such as D:\\AI.");
+  // After whatever is being downloaded or copied: those writes go to the folder they started
+  // in, and a change halfway would leave them behind
+  const run = Promise.all([installing, drawing]).then(async () => {
+    if (next === root()) return status();
+    stopServer();
+    chosen = next;
+    await fs.promises.mkdir(settingsFile(), { recursive: true });
+    await fs.promises.writeFile(settingsFile(), `${JSON.stringify({ folder: next }, null, 2)}\n`, "utf8");
+    if (next) await fs.promises.mkdir(root(), { recursive: true });
+    return status();
+  });
+  installing = run.catch(() => {});
+  return run;
+};
+// Free room on the drive the models go to, for the settings to say before 6 GB is downloaded
+const FREE_MINIMUM = 1024 ** 3;
+const freeSpace = () => {
+  const folder = root();
+  let probe = folder;
+  // The folder may not exist yet: its nearest parent says the drive
+  while (probe && !fs.existsSync(probe)) probe = path.dirname(probe) === probe ? "" : path.dirname(probe);
+  return new Promise((resolve) => {
+    if (!probe) return resolve(null);
+    fs.statfs(probe, (error, stats) => {
+      if (error || !stats) return resolve(null);
+      resolve({ free: stats.bavail * stats.bsize, enough: stats.bavail * stats.bsize >= FREE_MINIMUM });
+    });
+  });
+};
+// Folders that have models in them while the app now looks elsewhere: the one before a change,
+// the environment's and the app's own. The settings offer to copy them over.
+const usedFolders = () => {
+  const here = path.resolve(root());
+  const places = [];
+  if (process.env.TYPER_LOCAL_AI_DIR) places.push(process.env.TYPER_LOCAL_AI_DIR);
+  places.push(path.join(app.getPath("userData"), "local-ai"));
+  return places.filter((one, at, all) => one && path.resolve(one) !== here && fs.existsSync(one) && all.indexOf(one) === at);
+};
+// The files a model needs, so a copy moves them all: the engine, the weights, and their marks
+const filesIn = (folder) => {
+  const out = [];
+  const look = (dir) => {
+    try {
+      return fs.readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+      return [];
+    }
+  };
+  look(path.join(folder, "models")).forEach((entry) => {
+    if (entry.isFile()) out.push({ from: path.join(folder, "models", entry.name), to: path.join(root(), "models", entry.name) });
+  });
+  look(path.join(folder, "engine")).forEach((entry) => {
+    if (entry.isFile()) out.push({ from: path.join(folder, "engine", entry.name), to: path.join(engineDir(), entry.name) });
+  });
+  return out;
+};
+// Copies the models found in an older folder into the one in use, skipping files already there
+// whole. A copy, not a move: an interrupted one loses nothing, and the old folder can be
+// looked at before it is deleted by hand.
+const migrateNow = async (from, onProgress) => {
+  const files = filesIn(from);
+  const total = files.reduce((sum, one) => {
+    try {
+      return sum + fs.statSync(one.from).size;
+    } catch (error) {
+      return sum;
+    }
+  }, 0);
+  let done = 0;
+  for (const one of files) {
+    try {
+      const { size } = await fs.promises.stat(one.from);
+      let whole = false;
+      try {
+        whole = (await fs.promises.stat(one.to)).size === size;
+      } catch (error) {
+        whole = false;
+      }
+      if (!whole) {
+        await fs.promises.mkdir(path.dirname(one.to), { recursive: true });
+        await fs.promises.copyFile(one.from, `${one.to}.part`);
+        await fs.promises.rename(`${one.to}.part`, one.to);
+      }
+      done += size;
+      if (onProgress) onProgress({ phase: "copy", loaded: done, total });
+    } catch (error) {
+      throw new LocalError("other", `A file could not be copied: ${path.basename(one.from)}`);
+    }
+  }
+  return status();
+};
+// Copies wait for downloads and each other, as the downloads do: a half-copied file must not be
+// read while it is written
+const migrate = (from, onProgress) => {
+  const run = Promise.all([installing, drawing]).then(() => migrateNow(from, onProgress));
+  installing = run.catch(() => {});
+  return run;
+};
+
+module.exports = { status, install, remove, generate, stopServer, folder: root, setFolder, freeSpace, usedFolders, migrate, settingsFile, LocalError };

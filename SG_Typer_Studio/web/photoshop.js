@@ -8065,19 +8065,41 @@
       background.bitmap = canvas;
       commitState(doc, "Flatten Image", { layers: [background], activeIds: [background.id] });
     },
+    // Rasterize Type keeps its own name in the history and in Actions.
     rasterizeText(id) {
-      return ops.rasterizeLayer(id);
+      return ops.rasterizeLayer(id, true);
     },
-    // Rasterize Layer, as Photoshop's: a text is no longer editable and is its pixels, on the
-    // page where it stands. Effects, stroke and fill are drawn in; the mask stays a mask.
-    // Everything else is already pixels: a pixel layer, a group, a curve. Photoshop's own
-    // Rasterize Layer exists for vectors, and a folder is merged rather than rasterized.
-    rasterizeLayer(id) {
+    // Rasterize Layer, as Photoshop's: a text, an SFX or another drawn object stops being
+    // editable and is its pixels, on the page where it stands. Effects, stroke and fill are
+    // drawn in; the mask stays a mask.
+    //
+    // A folder is merged into one pixel layer, Photoshop's "Merge Group" and what its own
+    // Rasterize Layer does to a smart object; a pixel layer has nothing to rasterize. A curve
+    // has no pixels of its own: it stays an adjustment.
+    rasterizeLayer(id, typeOnly) {
       const doc = app.doc;
-      const layer = doc && doc.state.layers.find((item) => item.id === id && item.kind === "text");
-      if (!layer) return false;
+      const layer = doc && doc.state.layers.find((item) => item.id === id);
+      if (!layer || layer.kind === "raster" || layer.kind === "curves") return false;
+      const name = typeOnly ? "Rasterize Type" : "Rasterize Layer";
+      if (layer.kind === "group") {
+        // Its children, its own opacity and blend into the pixels; the folder is gone
+        const family = familyOf(doc.state.layers, id);
+        if (doc.state.layers.some((item) => family.has(item.id) && item.locked)) {
+          emit("layer-locked");
+          return false;
+        }
+        const whole = Object.assign({}, layer, { visible: true, opacity: 1 });
+        const inside = doc.state.layers.filter((item) => family.has(item.id)).map((item) => (item === layer ? whole : item));
+        const raster = newRaster(layer.name, { group: layer.group || null, visible: layer.visible !== false, opacity: layer.opacity === undefined ? 1 : layer.opacity, blend: layer.blend === "pass through" ? "normal" : layer.blend || "normal", clipping: layer.clipping, mask: layer.mask || null, vectorMask: layer.vectorMask || null });
+        raster.bitmap = paintAlone(doc, inside);
+        const layers = doc.state.layers.flatMap((item) => (item === layer ? [raster] : family.has(item.id) ? [] : [item]));
+        commitState(doc, name, { layers, activeIds: [raster.id] });
+        firePanelEvent(EVENT_SELECT);
+        return true;
+      }
+      // A text, an SFX panel, anything else drawn: what shows, drawn in on the page
       const raster = newRaster(layer.name, { group: layer.group, opacity: layer.opacity, blend: layer.blend, visible: layer.visible, clipping: layer.clipping, mask: layer.mask || null, vectorMask: layer.vectorMask || null, bitmap: flattenLayers(doc, [Object.assign({}, layer, { opacity: 1, blend: "normal", mask: null, vectorMask: null })]) });
-      commitState(doc, "Rasterize Layer", { layers: doc.state.layers.map((item) => (item.id === id ? raster : item)), activeIds: [raster.id] });
+      commitState(doc, name, { layers: doc.state.layers.map((item) => (item.id === id ? raster : item)), activeIds: [raster.id] });
       return true;
     },
     /* ---- masks ---- */

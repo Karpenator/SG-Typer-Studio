@@ -55,12 +55,16 @@ test("A recorded rename finds its layer by the name it had, not the one it is gi
 
 test("Rasterize Layer turns a text or an SFX into its pixels, as Photoshop's does", () => {
   const photoshop = read("web/photoshop.js");
-  assert.ok(photoshop.includes("rasterizeLayer(id) {"), "the engine has Rasterize Layer");
-  assert.ok(photoshop.includes("rasterizeText(id) {\n      return ops.rasterizeLayer(id);"), "Rasterize Type shares the same step");
-  assert.ok(photoshop.includes('item.kind === "text");'), "only a text has pixels to be made of");
-  assert.ok(!photoshop.includes('const visual = visualOf(layer, doc);\n      if (!visual || !visual.canvas'), "a folder is merged, not rasterized");
-  assert.ok(photoshop.includes('commitState(doc, "Rasterize Layer"'), "it is one undoable step");
+  assert.ok(photoshop.includes("rasterizeLayer(id, typeOnly) {"), "the engine has Rasterize Layer");
+  assert.ok(photoshop.includes("return ops.rasterizeLayer(id, true);"), "Rasterize Type shares the same step, under its own name");
+  assert.ok(photoshop.includes('if (!layer || layer.kind === "raster" || layer.kind === "curves") return false;'), "a pixel layer has nothing to rasterize, and a curve stays an adjustment");
+  assert.ok(photoshop.includes('if (layer.kind === "group") {'), "a folder is merged into its pixels, as Photoshop's Rasterize Layer and Merge Group do");
+  assert.ok(photoshop.includes('raster.bitmap = paintAlone(doc, inside);'), "the folder's pixels come from what it holds");
+  assert.ok(photoshop.includes('const raster = newRaster(layer.name, { group: layer.group, opacity: layer.opacity'), "an SFX panel takes its pixels from what shows on the page");
+  assert.ok(photoshop.includes('const name = typeOnly ? "Rasterize Type" : "Rasterize Layer";'), "each keeps its own name in History");
+  assert.ok(photoshop.includes("commitState(doc, name,"), "it is one undoable step");
   const app = read("web/app.js");
   assert.ok(app.includes('{ label: "Rasterize Layer", keys: "Shift+Cmd+Y"'), "Layer > Rasterize Layer");
   assert.ok(app.includes('"Rasterize Type", "Rasterize Layer", null, "Convert to SFX"'), "the layer menu has it too");
+  assert.ok(app.includes('"Convert to Paragraph Text", "Convert to Point Text", "Rasterize Type", "Rasterize Layer", null, "Convert to SFX"'), "the page's own right-click menu has it as well");
 });

@@ -429,19 +429,50 @@ test("Generate goes to the model again when a plain, white area is selected afte
 
 test("the local model settings say where the models go and open that folder", async () => {
   const localAI = read("desktop/src/local-ai.js");
-  assert.ok(localAI.includes('folder: root(),'), "the status carries the folder");
-  assert.ok(localAI.includes('process.env.TYPER_LOCAL_AI_DIR || path.join(app.getPath("userData"), "local-ai")'), "the folder can be moved to another disk");
+  assert.ok(localAI.includes("folder: root(),"), "the status carries the folder");
+  assert.ok(localAI.includes('const root = () => savedFolder() || process.env.TYPER_LOCAL_AI_DIR || path.join(app.getPath("userData"), "local-ai");'), "a picked folder wins over the environment's and the app's own");
+  assert.ok(localAI.includes('const settingsFile = () => path.join(app.getPath("userData"), "local-ai.json");'), "the choice is kept in the app's settings");
+  assert.ok(localAI.includes("const setFolder = async (folder) =>") && localAI.includes("if (next && !path.isAbsolute(next))"), "a folder can be chosen, and must be a full path");
+  assert.ok(localAI.includes("const freeSpace = () =>") && localAI.includes("fs.statfs("), "the room left on that drive is read");
+  assert.ok(localAI.includes("const migrateNow = async (from, onProgress) =>") && localAI.includes("const migrate = (from, onProgress) => {"), "models in an older folder can be copied over");
+  // The server runs from the folder, and the models are read from it: both go by root()
+  assert.ok(localAI.includes("const args = [\"--diffusion-model\", filePath(one.diffusion)"), "the engine runs the models where they now are");
+  assert.ok(localAI.includes("const pidPath = () => path.join(root(), \"server.pid\");"), "the server's pid is kept with them");
   const main = read("desktop/src/main.js");
   assert.ok(main.includes('ipcMain.handle("local-ai-folder"') && main.includes('ipcMain.handle("local-ai-show"'), "the app answers with the path and opens it");
   assert.ok(main.includes("await shell.openPath(folder)"));
-  assert.ok(read("desktop/src/preload.js").includes('folder: () => ipcRenderer.invoke("local-ai-folder")'));
-  assert.ok(read("desktop/src/preload.js").includes('show: () => ipcRenderer.invoke("local-ai-show")'));
+  for (const channel of ["local-ai-pick-folder", "local-ai-set-folder", "local-ai-free", "local-ai-elsewhere", "local-ai-migrate"]) {
+    assert.ok(main.includes(`ipcMain.handle("${channel}"`), `the app asks for a folder and keeps the answer (${channel})`);
+  }
+  assert.ok(main.includes('properties: ["openDirectory", "createDirectory"]'), "the dialog lets a new folder be made on another drive");
+  const preload = read("desktop/src/preload.js");
+  for (const line of ['folder: () => ipcRenderer.invoke("local-ai-folder")', 'show: () => ipcRenderer.invoke("local-ai-show")', 'pickFolder: (current) => ipcRenderer.invoke("local-ai-pick-folder", current)', 'setFolder: (folder) => ipcRenderer.invoke("local-ai-set-folder", folder)', 'freeSpace: () => ipcRenderer.invoke("local-ai-free")', 'elsewhere: () => ipcRenderer.invoke("local-ai-elsewhere")', 'migrate: (id, from) => ipcRenderer.invoke("local-ai-migrate", id, from)']) {
+    assert.ok(preload.includes(line), line);
+  }
   const source = read("web/generative.js");
-  const window = { localStorage: { getItem: () => null, setItem: () => {} }, dispatchEvent: () => {}, TypeRDesktop: { localAI: { onProgress: () => {}, folder: async () => "D:/AI/local-ai", show: async () => true } } };
+  const picked = [];
+  const window = { localStorage: { getItem: () => null, setItem: () => {} }, dispatchEvent: () => {}, TypeRDesktop: { localAI: {
+    onProgress: () => {},
+    folder: async () => "D:/AI/local-ai",
+    show: async () => true,
+    pickFolder: async () => ({ folder: "E:/Models" }),
+    setFolder: async (folder) => { picked.push(folder); return { folder }; },
+    freeSpace: async () => ({ free: 100 * 1024 ** 3, enough: true }),
+    elsewhere: async () => ["C:/old/local-ai"],
+    migrate: async () => ({ ok: true, value: { folder: "E:/Models" } }),
+  } } };
   const context = { window, localStorage: window.localStorage, console, URL, CustomEvent: function () {}, setTimeout, clearTimeout, FormData, Blob, atob, DOMException, fetch: async () => { throw new Error("no"); } };
   vm.runInNewContext(source, context);
-  assert.equal(await window.TypeRGenerative.localFolder(), "D:/AI/local-ai");
-  assert.equal(await window.TypeRGenerative.localShowFolder(), true);
+  const Gen = window.TypeRGenerative;
+  assert.equal(await Gen.localFolder(), "D:/AI/local-ai");
+  assert.equal(await Gen.localShowFolder(), true);
+  assert.deepEqual(Object.assign({}, await Gen.localPickFolder("C:/where")), { folder: "E:/Models" });
+  assert.equal((await Gen.localSetFolder("E:/Models")).folder, "E:/Models");
+  assert.deepEqual(picked, ["E:/Models"]);
+  assert.equal((await Gen.localFreeSpace()).enough, true);
+  assert.deepEqual(Object.assign([], await Gen.localElsewhere()), ["C:/old/local-ai"]);
+  assert.equal((await Gen.localMigrate("C:/old/local-ai", () => {}, null)).folder, "E:/Models");
   const app = read("web/app.js");
-  assert.ok(app.includes('T("Installed in:")') && app.includes('T("Open Folder")'), "the settings show the path with a way to open it");
+  assert.ok(app.includes('T("Downloaded to:")') && app.includes('T("Choose Folder…")') && app.includes('T("Open")'), "the settings show the path, a way to open it and a way to change it");
+  assert.ok(app.includes('T("Default Folder")') && app.includes('T("Copy Them")'), "the app's own folder can come back, and models left behind can be copied");
 });

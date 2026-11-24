@@ -40,6 +40,7 @@
     box: $("layer-box"),
     handles: $("handles"),
     brushRing: $("brush-ring"),
+    brushRingUnder: $("brush-ring-under"),
     spreads: { left: $("spread-left"), right: $("spread-right") },
     brushPreview: $("brush-preview"),
     editor: $("editor"),
@@ -510,6 +511,9 @@
       cancelAnimationFrame(frame);
       frame = 0;
       sampleColorForPicker = null;
+      // The picker is sampled with the stage's pointer and closes on its own OK or Cancel: no key
+      // was let go then and the pointer doesn't move. Its eyedropper goes with its window.
+      ui.stage.classList.remove("is-sampling");
       closeColorPicker = null;
       apply(keep ? hex() : original);
       if (keep) input.dispatchEvent(new Event("change", { bubbles: true }));
@@ -1680,7 +1684,7 @@
     else if (transform) transform.doc.liveTransform = null;
     transform = null;
     smartLines = [];
-    ui.stage.style.cursor = "";
+    setStageCursor("");
     schedule(true);
     renderOptions();
     renderStatus();
@@ -2279,7 +2283,7 @@
       if (crop && crop.edited) commitCrop();
       crop = null;
     }
-    ui.stage.style.cursor = "";
+    setStageCursor("");
     app.tool = tool;
     ui.stage.dataset.tool = tool;
     // A group shows the tool last chosen in it, by its list or by its key
@@ -2294,7 +2298,7 @@
       button.classList.toggle("is-on", on);
       button.setAttribute("aria-pressed", String(on));
     });
-    ui.brushRing.setAttribute("hidden", "");
+    hideBrushRing();
     if (window.TypeRSFX) window.TypeRSFX.toolChosen(tool);
     if (window.TypeRReshapeTool) window.TypeRReshapeTool.toolChosen(tool);
     if (window.TypeRRetouch) window.TypeRRetouch.toolChosen(tool);
@@ -4202,25 +4206,105 @@
         // and whether it's downloaded, are in the list of models)
         const named = modelName({ custom, service }, model);
         price.textContent = fill(T("Free, on this computer: {model} redraws the selection from what surrounds it, and follows your prompt if you write one. About a minute per fill with a good graphics card, much longer without one."), { model: named });
-        // The folder the models go to, said plainly and openable: they need gigabytes, and the
-        // first drive is not always the roomy one (TYPER_LOCAL_AI_DIR moves it)
+        // The folder the models go to, said plainly, openable, and chosen here: they need
+        // gigabytes, and the first drive is not always the roomy one
         const folderLine = document.createElement("span");
-        folderLine.className = "gensettings__local";
+        folderLine.className = "gensettings__local gensettings__folder";
         price.append(" ", folderLine);
-        Gen.localFolder().then((folder) => {
-          if (!folder || !folderLine.isConnected) return;
-          folderLine.textContent = `${T("Installed in:")} `;
+        // Built again after a change, so the path, the free room and the models left elsewhere
+        // are all read afresh
+        const showFolder = async () => {
+          const now = await Gen.localStatus().catch(() => null);
+          const free = await Gen.localFreeSpace().catch(() => null);
+          const before = await Gen.localElsewhere().catch(() => []);
+          if (!folderLine.isConnected) return;
+          folderLine.textContent = "";
+          if (!now || !now.folder) {
+            folderLine.textContent = T("The folder is chosen in the desktop app.");
+            return;
+          }
+          folderLine.append(`${T("Downloaded to:")} `);
           const where = document.createElement("code");
           where.className = "gensettings__path";
-          where.textContent = folder;
-          where.title = T("Practically, the disk with this folder must have the free space the model needs. Set TYPER_LOCAL_AI_DIR to keep it elsewhere.");
+          where.textContent = now.folder;
+          where.title = now.folderSet ? T("Chosen here. Empty folder: the app's own place is used again.") : T("The app's own place. Choose another folder under The Models' Folder.");
+          folderLine.append(where);
+          if (free && free.free) {
+            const room = document.createElement("span");
+            room.className = free.enough ? "gensettings__room" : "gensettings__room is-tight";
+            room.textContent = free.enough
+              ? fill(T("{size} free there."), { size: sizeText(free.free) })
+              : fill(T("Only {size} free there: the models need more room."), { size: sizeText(free.free) });
+            folderLine.append(" ", room);
+          }
+          const buttons = document.createElement("span");
+          buttons.className = "gensettings__folder-buttons";
           const open = document.createElement("button");
           open.type = "button";
           open.className = "btn btn--small";
-          open.textContent = T("Open Folder");
+          open.textContent = T("Open");
           open.addEventListener("click", () => Gen.localShowFolder().catch(() => null));
-          folderLine.append(where, " ", open);
-        });
+          const pick = document.createElement("button");
+          pick.type = "button";
+          pick.className = "btn btn--small";
+          pick.textContent = T("Choose Folder…");
+          pick.addEventListener("click", async () => {
+            const answer = await Gen.localPickFolder(now.folder).catch(() => ({ cancelled: true }));
+            if (!answer || answer.cancelled || !answer.folder) return;
+            pick.disabled = true;
+            const result = await Gen.localSetFolder(answer.folder).catch((error) => ({ error: error.message }));
+            pick.disabled = false;
+            if (result && result.error) {
+              toast(result.error, true);
+              return;
+            }
+            // The model list says where each model is now: none of them are in a new folder
+            if (price.isConnected) showModels();
+            await showFolder();
+          });
+          const plain = document.createElement("button");
+          plain.type = "button";
+          plain.className = "btn btn--small";
+          plain.textContent = T("Default Folder");
+          plain.hidden = !now.folderSet;
+          plain.addEventListener("click", async () => {
+            plain.disabled = true;
+            await Gen.localSetFolder("").catch(() => null);
+            plain.disabled = false;
+            if (price.isConnected) showModels();
+            await showFolder();
+          });
+          buttons.append(open, pick, plain);
+          folderLine.append(" ", buttons);
+          // Models already downloaded somewhere the app looked before: copied, not downloaded again
+          if (before.length) {
+            const copy = document.createElement("span");
+            copy.className = "gensettings__local";
+            copy.textContent = `${fill(T("Models from the old folder can be copied here instead of downloaded again: {folder}"), { folder: before[0] })} `;
+            const go = document.createElement("button");
+            go.type = "button";
+            go.className = "btn btn--small";
+            go.textContent = T("Copy Them");
+            go.addEventListener("click", async () => {
+              go.disabled = true;
+              try {
+                await Gen.localMigrate(before[0], (step) => {
+                  if (step.phase === "copy" && step.total) copy.firstChild.textContent = `${fill(T("Copying the models: {percent}%"), { percent: Math.floor(step.loaded / step.total * 100) })} `;
+                }, listeners.signal);
+                await showFolder();
+                if (price.isConnected) showModels();
+              } catch (error) {
+                if (error.name !== "AbortError" && copy.isConnected) {
+                  copy.firstChild.textContent = `${generativeMessage(error, { service: "local", models: { local: model }, custom })} `;
+                  go.disabled = false;
+                }
+              }
+            });
+            copy.append(go);
+            price.append(" ", copy);
+          }
+        };
+        showFolder().catch(() => null);
         Gen.localStatus().then((now) => {
           const here = now && now.models && now.models[model];
           if (!here || !price.isConnected || modelSelect.value !== model) return;
@@ -6471,20 +6555,31 @@
   // moves the layer, a click on another one picks it. Not to the tools Ctrl already means
   // something to (the Magic Wand, the Bubble Cleaner, the SFX), nor while a polygon is drawn.
   const LENDS_MOVE = new Set(["rectangle", "ellipse", "lasso", "polygon", "brush", "eraser", "magicEraser", "stamp", "healing", "heal", "smudge", "gradient", "eyedropper", "text"]);
-  const moveLent = (event) => LENDS_MOVE.has(app.tool) && (IS_MAC ? event.metaKey : event.ctrlKey) && !spacing && !polygon && Boolean(app.doc) && !transformOf();
+  // Ctrl + Alt is the brush's own, with either button: it is no loan of the Move tool
+  const moveLent = (event) => LENDS_MOVE.has(app.tool) && (IS_MAC ? event.metaKey : event.ctrlKey) && !event.altKey && !spacing && !polygon && Boolean(app.doc) && !transformOf();
   let hoverAt = null;
   // Where the pointer last was, in the stage's own pixels: [ to ] draws the new size there at
   // once, without waiting for the next move
   let brushAt = null;
   // The brush ring at the pointer, at the size and hardness it has now
+  // The ring is drawn twice: a dark under-stroke and a white one over it, so it shows on a light
+  // page and on a dark one. Both circles are placed, shown and hidden together.
+  const placeBrushRing = (x, y, radius) => {
+    [ui.brushRingUnder, ui.brushRing].forEach((ring) => {
+      if (!ring) return;
+      ring.setAttribute("cx", x);
+      ring.setAttribute("cy", y);
+      ring.setAttribute("r", radius);
+      ring.removeAttribute("hidden");
+    });
+  };
+  const hideBrushRing = () => {
+    [ui.brushRing, ui.brushRingUnder].forEach((ring) => ring && ring.setAttribute("hidden", ""));
+  };
   const showBrushAtPointer = () => {
-    const tools = new Set(["brush", "eraser", "stamp", "healing", "heal", "smudge"]);
+    const tools = BRUSHING_TOOLS;
     if (!brushAt || !tools.has(app.tool) || !app.doc || gesture || !ui.editor.hidden) return;
-    const zoom = view().zoom;
-    ui.brushRing.setAttribute("cx", brushAt[0]);
-    ui.brushRing.setAttribute("cy", brushAt[1]);
-    ui.brushRing.setAttribute("r", Math.max(1, (app.brush.size / 2) * zoom));
-    ui.brushRing.removeAttribute("hidden");
+    placeBrushRing(brushAt[0], brushAt[1], Math.max(1, (app.brush.size / 2) * view().zoom));
   };
   const ADAPTIVE_CURSOR_TOOLS = new Set(["wand", "magicEraser", "clean", "rectangle", "ellipse", "lasso", "polygon", "crop", "gradient"]);
   const adaptiveCursor = (kind, color) => {
@@ -6500,34 +6595,54 @@
     const hotspot = kind === "crosshair" ? "12 12" : kind === "wand" ? "18 5" : "2 22";
     return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${hotspot}, crosshair`;
   };
+  // The cursor this code put on the stage, so it can be taken off again. Leaving it as an inline
+  // style meant an eyedropper stayed behind after Alt was let go, and no later class could win.
+  let cursorSet = "";
+  const setStageCursor = (value) => {
+    if (cursorSet === value && ui.stage.style.cursor === value) return;
+    cursorSet = value;
+    ui.stage.style.cursor = value;
+  };
   const showAdaptiveCursor = (event) => {
     if (!app.doc || !hoverAt) return;
     const navigating = spacing || zoomHeld(event) || moveLent(event) || (gesture && (gesture.kind === "pan" || gesture.kind === "zoom"));
     if (navigating) {
-      ui.stage.style.cursor = "";
+      setStageCursor("");
       return;
     }
     if (gesture || wandSetAside(event) || ui.stage.classList.contains("is-over-selection")) return;
     const sampling = isSampling(event);
-    if (!sampling && !ADAPTIVE_CURSOR_TOOLS.has(app.tool)) return;
+    if (!sampling && !ADAPTIVE_CURSOR_TOOLS.has(app.tool)) {
+      // Alt let go on a brush: the icon an Alt before it put there goes with it. The brush shows
+      // its ring instead, as its class says (cursor: none).
+      if (cursorSet && BRUSHING_TOOLS.has(app.tool)) setStageCursor("");
+      return;
+    }
     const [x, y] = toDoc(hoverAt).map(Math.floor);
     if (x < 0 || y < 0 || x >= docCanvas.width || y >= docCanvas.height) return;
     // The page is already composed here: reading one pixel must not repaint every layer on
     // every pointermove just to choose the cursor's ink.
     const pixel = docCanvas.getContext("2d").getImageData(x, y, 1, 1).data;
-    if (pixel[3]) ui.stage.style.cursor = adaptiveCursor(sampling ? "eyedropper" : app.tool === "wand" ? "wand" : "crosshair", { r: pixel[0], g: pixel[1], b: pixel[2] });
+    if (pixel[3]) setStageCursor(adaptiveCursor(sampling ? "eyedropper" : app.tool === "wand" ? "wand" : "crosshair", { r: pixel[0], g: pixel[1], b: pixel[2] }));
+    else if (BRUSHING_TOOLS.has(app.tool)) setStageCursor("");
   };
   const showWandSetAside = (event) => {
     // A key has no position: it goes by where the pointer last was
     if (event.clientX !== undefined) hoverAt = event;
     if (app.tool !== "wand" || !app.doc || gesture || !ui.editor.hidden || transformOf()) return;
     const aside = hoverAt && wandSetAside(event);
-    ui.stage.style.cursor = aside ? (textAt(toDoc(hoverAt)) ? "text" : "default") : "";
+    setStageCursor(aside ? (textAt(toDoc(hoverAt)) ? "text" : "default") : "");
   };
   const showSampling = (event) => {
     showWandSetAside(event);
     ui.stage.classList.toggle("is-move-lent", gesture ? Boolean(gesture.lent) : ui.editor.hidden && moveLent(event));
     ui.stage.classList.toggle("is-sampling", gesture ? gesture.kind === "pick" : isSampling(event));
+    // A brush hides its own cursor behind the ring: the eyedropper's class stays, but the ring
+    // must come with it, or the pointer has no face at all. Alt let go: the ring is the brush's.
+    if (BRUSHING_TOOLS.has(app.tool) && !gesture) {
+      if (isSampling(event)) hideBrushRing();
+      else showBrushAtPointer();
+    }
     const cloning = !gesture && (app.tool === "stamp" || app.tool === "healing") && event.altKey && !event.ctrlKey && !event.metaKey && !spacing;
     ui.stage.classList.toggle("is-cloning", cloning);
     if (cloning) hideStampPreview();
@@ -6560,10 +6675,7 @@
       background: `radial-gradient(circle closest-side, rgba(255, 0, 0, 0.8) ${hardness}%, rgba(255, 0, 0, 0) 100%)`,
     });
     ui.brushPreview.hidden = false;
-    ui.brushRing.setAttribute("cx", x);
-    ui.brushRing.setAttribute("cy", y);
-    ui.brushRing.setAttribute("r", diameter / 2);
-    ui.brushRing.removeAttribute("hidden");
+    placeBrushRing(x, y, diameter / 2);
     // The Smudge tool's Strength is what Ctrl + Alt + right-drag changes: its hardness hardly matters
     hud(app.tool === "smudge" ? `${T("Diameter")}: ${size} px\n${T("Strength")}: ${smudge.strength}%` : `${T("Diameter")}: ${size} px\n${T("Hardness")}: ${hardness}%`, event);
   };
@@ -6575,7 +6687,7 @@
   const hideBrushPreview = () => {
     if (gesture) return;
     ui.brushPreview.hidden = true;
-    ui.brushRing.setAttribute("hidden", "");
+    hideBrushRing();
     hud(null);
   };
   const previewBrush = () => {
@@ -6955,10 +7067,15 @@
     const handleWhileTyping = !ui.editor.hidden && (hitHandle(event) || turnWhileTyping);
     const moveWhileTyping = !handleWhileTyping && event.button === 0 && !moveLent(event) && inTypingMoveZone(event);
     const fingerWhileTyping = !ui.editor.hidden && !handleWhileTyping && isFinger(event);
+    // Ctrl + Alt with the right button resizes the brush: that comes first, before the lent Move
+    // tool, before a text's handles and before the right button is dropped as unknown. A finger
+    // and a pen keep their own ways.
+    const brushResize = !isFinger(event) && event.pointerType !== "pen" && Boolean(app.doc) && isBrushAdjust(event);
     if (!ui.editor.hidden && !handleWhileTyping && !fingerWhileTyping && !moveWhileTyping) {
       endEdit();
-      // The click that closes a text only closes it: with the wand it would paste the next line
-      if ((app.tool === "text" && !moveLent(event)) || (app.tool === "wand" && !wandSetAside(event))) return;
+      // A click that closes a text only closes it: with the wand it would paste the next line. The
+      // brush's own Ctrl + Alt + right-drag goes on to resize, whether it closed the text or not.
+      if (!brushResize && ((app.tool === "text" && !moveLent(event)) || (app.tool === "wand" && !wandSetAside(event)))) return;
     }
     if (!handleWhileTyping && !fingerWhileTyping && !moveWhileTyping) ui.stage.focus({ preventScroll: true });
     if (event.pointerType === "pen") penSeen = true;
@@ -6990,7 +7107,7 @@
     if (multi) return;
     const doc = app.doc;
     if (!doc) return;
-    const lent = !handleWhileTyping && !isFinger(event) && moveLent(event);
+    const lent = !brushResize && !handleWhileTyping && !isFinger(event) && moveLent(event);
     const tool = lent ? "move" : app.tool;
     const point = toDoc(event);
     const base = { id: event.pointerId, start: point, last: point, x: event.clientX, y: event.clientY, moved: false, slop: event.pointerType === "touch" ? 8 : 3, shiftAtStart: event.shiftKey, altAtStart: event.altKey, lent };
@@ -7015,7 +7132,7 @@
       beginZoom(base, event);
       return;
     }
-    if ((tool === "brush" || tool === "eraser" || tool === "stamp" || tool === "healing" || tool === "heal" || tool === "smudge") && isBrushAdjust(event)) {
+    if ((app.tool === "brush" || app.tool === "eraser" || app.tool === "stamp" || app.tool === "healing" || app.tool === "heal" || app.tool === "smudge") && brushResize) {
       gesture = Object.assign(base, { kind: "brushAdjust", size: app.brush.size, hardness: app.brush.hardness, strength: smudge.strength, slop: 0 });
       ui.stage.setPointerCapture(event.pointerId);
       // Ctrl + Alt + right-drag is no eyedropper: the ring alone follows, as the brush grows
@@ -7322,14 +7439,14 @@
     }
     if ((tool === "move" || !ui.editor.hidden) && !gesture && app.doc) {
       const over = hitHandle(event);
-      ui.stage.style.cursor = over ? handleCursor(over) : rotateZoneCursor(event) || (inTypingMoveZone(event) ? "move" : "");
+      setStageCursor(over ? handleCursor(over) : rotateZoneCursor(event) || (inTypingMoveZone(event) ? "move" : ""));
     }
     const turning = transformOf();
-    if (turning && !gesture) ui.stage.style.cursor = transformCursor(turning, event);
+    if (turning && !gesture) setStageCursor(transformCursor(turning, event));
     if (tool === "crop" && !gesture && app.doc) {
       const over = hitHandle(event);
       const c = cropOf();
-      ui.stage.style.cursor = over ? HANDLE_CURSOR[over.kind] : c.touched && inCrop(c, toDoc(event)) ? "move" : "";
+      setStageCursor(over ? HANDLE_CURSOR[over.kind] : c.touched && inCrop(c, toDoc(event)) ? "move" : "");
     }
     if (polygon && (tool === "polygon" || polygon.clean) && !gesture && !pinch) showPolygon(polygonAim(toDoc(event), event));
     if (tool === "sfx" && !gesture && app.doc && window.TypeRSFX) window.TypeRSFX.hover(event, toDoc(event));
@@ -7604,7 +7721,7 @@
     setDrag("");
     hud(null);
     ui.stage.classList.remove("is-panning", "is-marquee");
-    if (event.pointerType === "touch") ui.brushRing.setAttribute("hidden", "");
+    if (event.pointerType === "touch") hideBrushRing();
     const cancelled = event.type === "pointercancel";
     const point = cancelled ? current.last : carried(current, toDoc(event));
     const { kind, mode } = current;
@@ -7637,9 +7754,13 @@
       renderOptions();
     } else if (kind === "brushAdjust") {
       ui.brushPreview.hidden = true;
-      // The pointer may still hold Alt and Ctrl: the ring, the brush or the eyedropper decide
-      // again on the next move, none is left on the page meanwhile
+      // The brush's own ring comes back where the pointer is: no eyedropper icon stays on the
+      // page, whichever keys are still held
+      ui.stage.classList.remove("is-sampling");
+      if (hoverAt) brushAt = [hoverAt.clientX, hoverAt.clientY];
+      hideBrushRing();
       showSampling(event);
+      showBrushAtPointer();
       renderOptions();
     } else if (kind === "scale" || kind === "scaleTexts") {
       // The size in the options bar follows the handles
@@ -7714,7 +7835,7 @@
   ["pointerup", "pointercancel"].forEach((type) => ui.stage.addEventListener(type, settleSpring));
   ["pointerup", "pointercancel"].forEach((type) => ui.stage.addEventListener(type, settleShapeHold));
   ui.stage.addEventListener("pointerleave", () => {
-    ui.brushRing.setAttribute("hidden", "");
+    hideBrushRing();
     hideStampPreview();
     hoverTextArea(null);
   });
@@ -7737,7 +7858,7 @@
     const point = toDoc(event);
     const hit = ops.hitLayer(point[0], point[1]);
     if (hit && !app.doc.state.activeIds.includes(hit.id)) ops.selectLayer(hit.id);
-    openContextMenu(event.clientX, event.clientY, ["Deselect", "Reselect", "Inverse", null, "Cut", "Copy", "Fill with Foreground Colour", "Fill with Background Colour", "Content-Aware Fill…", "Generative Fill…", null, addMaskItem, addVectorMaskItem, "Create Clipping Mask", null, "Free Transform", null, "Blending Options…", null, "Duplicate Layer", "Group Layers", "Copy Layer", "Paste Layer", "Copy Layer Style", "Paste Layer Style", null, "Convert to Paragraph Text", "Convert to Point Text", "Rasterize Type", null, "Convert to SFX", "Separate SFX Letters", "Keep in the bank…", null, "Merge Down", "Merge Visible"]);
+    openContextMenu(event.clientX, event.clientY, ["Deselect", "Reselect", "Inverse", null, "Cut", "Copy", "Fill with Foreground Colour", "Fill with Background Colour", "Content-Aware Fill…", "Generative Fill…", null, addMaskItem, addVectorMaskItem, "Create Clipping Mask", null, "Free Transform", null, "Blending Options…", null, "Duplicate Layer", "Group Layers", "Copy Layer", "Paste Layer", "Copy Layer Style", "Paste Layer Style", null, "Convert to Paragraph Text", "Convert to Point Text", "Rasterize Type", "Rasterize Layer", null, "Convert to SFX", "Separate SFX Letters", "Keep in the bank…", null, "Merge Down", "Merge Visible"]);
   });
   ui.stage.addEventListener("dblclick", (event) => {
     if (app.tool === "gradient" && window.TypeRRetouch && window.TypeRRetouch.doubleClick(event)) {
@@ -16071,9 +16192,9 @@
     { label: "Show the mask in red", keys: "\\", virtual: true, action: () => toggleMaskView("overlay") },
   ];
   const hasText = () => activeTexts().length > 0;
-  // What Rasterize Layer turns into pixels: a text. A pixel layer, a folder and a curve are
-  // already what they are, and Photoshop merges a folder instead of rasterizing it
-  const canRasterize = (layer) => Boolean(layer) && layer.kind === "text";
+  // What Rasterize Layer turns into pixels: a text, an SFX, a folder (merged as Photoshop does)
+  // and anything else drawn. A pixel layer has nothing to rasterize; a curve is an adjustment.
+  const canRasterize = (layer) => Boolean(layer) && layer.kind !== "raster" && layer.kind !== "curves";
   const LAYER_AND_TEXT_ITEMS = [
     { label: "Select the layer above", keys: "Alt+]", enabled: hasDoc, action: () => selectNeighbourLayer(1, false, true) },
     { label: "Select the layer below", keys: "Alt+[", enabled: hasDoc, action: () => selectNeighbourLayer(-1, false, true) },

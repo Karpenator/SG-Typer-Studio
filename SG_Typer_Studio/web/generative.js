@@ -890,6 +890,17 @@
   // Where the models are kept on this computer, and a way to open it (п. 6)
   const localFolder = () => (desktopAI && desktopAI.folder ? desktopAI.folder() : Promise.resolve(null));
   const localShowFolder = () => (desktopAI && desktopAI.show ? desktopAI.show() : Promise.resolve(false));
+  // The folder is a choice, not just a place to look at: the app asks for it with its own
+  // dialog, keeps it, and says how much room is left there. Models already downloaded in the
+  // old folder can be copied over instead of downloaded again.
+  const localPickFolder = (current) => (desktopAI && desktopAI.pickFolder ? desktopAI.pickFolder(current) : Promise.resolve({ cancelled: true }));
+  const localSetFolder = (folder) => (desktopAI && desktopAI.setFolder ? desktopAI.setFolder(folder) : Promise.resolve(null));
+  const localFreeSpace = () => (desktopAI && desktopAI.freeSpace ? desktopAI.freeSpace() : Promise.resolve(null));
+  const localElsewhere = () => (desktopAI && desktopAI.elsewhere ? desktopAI.elsewhere() : Promise.resolve([]));
+  const localMigrate = (from, onProgress, signal) => {
+    if (!desktopAI || !desktopAI.migrate) return Promise.reject(new GenerativeError("local", "Copies run only in the desktop app."));
+    return askApp((id) => desktopAI.migrate(id, from), signal, onProgress);
+  };
   const viaFlux = async ({ model, canvas, mask, prompt, signal, onProgress }) => {
     if (!desktopAI) throw new GenerativeError("local", "FLUX runs only in the desktop app.");
     // At the model's sizes, in steps of 16 pixels; the mask white where it draws
@@ -998,5 +1009,5 @@
     }
   };
 
-  window.TypeRGenerative = { SERVICES, DEFAULT_PROMPT, LOCAL_SIZE, LAMA_SIZE, load, save, modelOf, modelsOf, slugOf, ready, isLocal, isFlux, takesPrompt, fixedSize, drawsInPlace, longestFor, localReady, localDownload, localStatus, localInstall, localRemove, localFolder, localShowFolder, ratiosFor, generate, discoverOpenRouter, endpointOf, GenerativeError, qualitiesOf, qualityOf, priceOf, costOf, refreshPrices, spent, resetSpent, adobeStatus, adobeConnect, adobeDisconnect, adobeCredits };
+  window.TypeRGenerative = { SERVICES, DEFAULT_PROMPT, LOCAL_SIZE, LAMA_SIZE, load, save, modelOf, modelsOf, slugOf, ready, isLocal, isFlux, takesPrompt, fixedSize, drawsInPlace, longestFor, localReady, localDownload, localStatus, localInstall, localRemove, localFolder, localShowFolder, localPickFolder, localSetFolder, localFreeSpace, localElsewhere, localMigrate, ratiosFor, generate, discoverOpenRouter, endpointOf, GenerativeError, qualitiesOf, qualityOf, priceOf, costOf, refreshPrices, spent, resetSpent, adobeStatus, adobeConnect, adobeDisconnect, adobeCredits };
 })();

@@ -8,7 +8,7 @@ const { contextBridge, ipcRenderer, webFrame } = require("electron");
 // Sandboxed preloads may require Electron and their own local modules, but not package.json.
 // Keep the fixed provider here: requiring the package used to abort the whole bridge, including
 // Actions, before contextBridge.exposeInMainWorld could run.
-const releasesUrl = "https://github.com/Karpenator/SG-Typer-Studio/releases";
+const releasesUrl = "https://github.com/Karpenator/Syndicate_Typer_Studio/releases";
 
 webFrame.setVisualZoomLevelLimits(1, 1);
 
@@ -88,6 +88,12 @@ contextBridge.exposeInMainWorld("TypeRDesktop", {
     remove: (model) => ipcRenderer.invoke("local-ai-remove", model),
     folder: () => ipcRenderer.invoke("local-ai-folder"),
     show: () => ipcRenderer.invoke("local-ai-show"),
+    // The folder is the user's choice: the app asks with its own dialog, and keeps the answer
+    pickFolder: (current) => ipcRenderer.invoke("local-ai-pick-folder", current),
+    setFolder: (folder) => ipcRenderer.invoke("local-ai-set-folder", folder),
+    freeSpace: () => ipcRenderer.invoke("local-ai-free"),
+    elsewhere: () => ipcRenderer.invoke("local-ai-elsewhere"),
+    migrate: (id, from) => ipcRenderer.invoke("local-ai-migrate", id, from),
     generate: (id, request) => ipcRenderer.invoke("local-ai-generate", id, request),
     cancel: (id) => ipcRenderer.send("local-ai-cancel", id),
     onProgress: (listener) => ipcRenderer.on("local-ai-progress", (event, progress) => listener(progress)),

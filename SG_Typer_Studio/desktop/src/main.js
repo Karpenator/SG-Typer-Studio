@@ -508,6 +508,34 @@ ipcMain.handle("local-ai-show", async (event) => {
   await fs.promises.mkdir(folder, { recursive: true });
   return !(await shell.openPath(folder));
 });
+// The folder the models go to is a choice: the page can't open a dialog, so the app does, and
+// keeps the answer. Empty picks the app's own folder again.
+const localFolderDialog = async (event, current) => {
+  if (!fromPage(event)) return { cancelled: true };
+  const answer = await dialog.showOpenDialog(win, {
+    title: "Folder for the local AI models",
+    defaultPath: typeof current === "string" && path.isAbsolute(current) ? current : localAI.folder(),
+    properties: ["openDirectory", "createDirectory"],
+    buttonLabel: "Use This Folder",
+  });
+  if (answer.canceled || !answer.filePaths.length) return { cancelled: true };
+  return { folder: answer.filePaths[0] };
+};
+ipcMain.handle("local-ai-pick-folder", (event, current) => localFolderDialog(event, current));
+ipcMain.handle("local-ai-set-folder", async (event, folder) => {
+  if (!fromPage(event)) return null;
+  try {
+    return await localAI.setFolder(folder);
+  } catch (error) {
+    if (error instanceof localAI.LocalError) return { error: error.message };
+    throw error;
+  }
+});
+// Free room where the models go, before 6 GB is asked to fit
+ipcMain.handle("local-ai-free", (event) => (fromPage(event) ? localAI.freeSpace() : null));
+// Models left in a folder the app no longer looks at: the settings offer to copy them over
+ipcMain.handle("local-ai-elsewhere", (event) => (fromPage(event) ? localAI.usedFolders() : []));
+ipcMain.handle("local-ai-migrate", (event, id, from) => localJob(event, id, (signal, tell) => localAI.migrate(String(from), tell)));
 ipcMain.handle("local-ai-generate", (event, id, request) => localJob(event, id, (signal, tell) => {
   const { model, image, mask, prompt, width, height } = request || {};
   if (!(image instanceof Uint8Array) || !(mask instanceof Uint8Array) || !Number.isFinite(width) || !Number.isFinite(height) || width > 2048 || height > 2048) throw new localAI.LocalError("other", "Bad request.");
