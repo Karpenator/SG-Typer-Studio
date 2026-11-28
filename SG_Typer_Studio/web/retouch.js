@@ -363,6 +363,9 @@
     } else if (gesture.mode === "start") gesture.start = aimed(gesture.end, point, event);
     else gesture.end = aimed(gesture.start, point, event);
     tell(gesture.start, gesture.end, event);
+    // The line follows the pointer itself, not the next frame the page is painted on: with a big
+    // page that frame can be far behind, and the line then trailed the end it was dragged by
+    drawGradientMarks(gesture);
     drawSoon(gesture);
   };
   const gradientUp = (gesture, event, point, cancelled) => {
@@ -413,29 +416,58 @@
   };
 
   // Its line and its ends, on the screen
-  const drawGradientMarks = (parent, gesture) => {
+  // The gradient's line and its ends live in an overlay of their own, made once and moved after:
+  // the stage's overlay is emptied every frame, so marks left in it had to be made every frame too,
+  // and a drag of an end ran a frame or more behind the pointer.
+  const gradGroup = document.getElementById("grad-marks");
+  const gradMarks = { line: null, under: null, start: null, end: null, mid: null };
+  const makeGradientMarks = (parent) => {
+    if (gradMarks.line) return;
+    gradMarks.under = svgEl("path", { class: "grad-line grad-line--under", d: "" }, parent);
+    gradMarks.line = svgEl("path", { class: "grad-line", d: "" }, parent);
+    gradMarks.start = svgEl("circle", { class: "grad-end grad-end--start", cx: 0, cy: 0, r: 5 }, parent);
+    gradMarks.end = svgEl("circle", { class: "grad-end", cx: 0, cy: 0, r: 5 }, parent);
+    gradMarks.mid = svgEl("path", { class: "grad-mid", d: "" }, parent);
+  };
+  const hideGradientMarks = () => {
+    Object.values(gradMarks).forEach((el) => { if (el) el.setAttribute("hidden", ""); });
+  };
+  const drawGradientMarks = (gesture) => {
+    if (!gradGroup) return;
     let start;
     let end;
     if (gesture && gesture.kind === "retouch" && gesture.tool === "gradient") {
-      if (gesture.mode === "new" && !gesture.moved) return;
+      if (gesture.mode === "new" && !gesture.moved) {
+        hideGradientMarks();
+        return;
+      }
       ({ start, end } = gesture);
     } else {
       const current = liveNow();
-      if (!current || app.tool !== "gradient") return;
+      if (!current || app.tool !== "gradient") {
+        hideGradientMarks();
+        return;
+      }
       ({ start, end } = current);
     }
+    if (!gradMarks.line) makeGradientMarks(gradGroup);
     const a = App().toScreen(start[0], start[1]);
     const b = App().toScreen(end[0], end[1]);
     const d = `M${a[0]} ${a[1]}L${b[0]} ${b[1]}`;
-    svgEl("path", { class: "grad-line grad-line--under", d }, parent);
-    svgEl("path", { class: "grad-line", d }, parent);
+    gradMarks.line.setAttribute("d", d);
+    gradMarks.under.setAttribute("d", d);
     const r = touch() ? 7 : 5;
-    svgEl("circle", { class: "grad-end grad-end--start", cx: a[0], cy: a[1], r }, parent);
-    svgEl("circle", { class: "grad-end", cx: b[0], cy: b[1], r }, parent);
+    gradMarks.start.setAttribute("cx", a[0]);
+    gradMarks.start.setAttribute("cy", a[1]);
+    gradMarks.start.setAttribute("r", r);
+    gradMarks.end.setAttribute("cx", b[0]);
+    gradMarks.end.setAttribute("cy", b[1]);
+    gradMarks.end.setAttribute("r", r);
     const mx = (a[0] + b[0]) / 2;
     const my = (a[1] + b[1]) / 2;
     const m = r * 0.8;
-    svgEl("path", { class: "grad-mid", d: `M${mx} ${my - m}L${mx + m} ${my}L${mx} ${my + m}L${mx - m} ${my}Z` }, parent);
+    gradMarks.mid.setAttribute("d", `M${mx} ${my - m}L${mx + m} ${my}L${mx} ${my + m}L${mx - m} ${my}Z`);
+    Object.values(gradMarks).forEach((el) => el.removeAttribute("hidden"));
   };
 
   /* ------------------------------ the options bar ------------------------------ */
@@ -1034,7 +1066,8 @@
     },
     drawOverlay(handles, gesture) {
       drawHeals(gesture);
-      drawGradientMarks(handles, gesture);
+      // The line is in a group of its own: it is not emptied with the handles, and not made again
+      drawGradientMarks(gesture);
     },
     options,
     toolChosen(tool) {

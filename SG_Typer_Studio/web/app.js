@@ -47,6 +47,9 @@
     typeMarks: $("type-marks"),
     textMarks: $("text-marks"),
     hud: $("hud"),
+    loupe: $("loupe"),
+    loupeGrid: $("loupe-grid"),
+    loupeHex: $("loupe-hex"),
     tabs: $("tabs"),
     options: $("options"),
     tools: $("tools"),
@@ -6617,10 +6620,11 @@
     const paths = {
       crosshair: '<path d="M12 2v7m0 6v7M2 12h7m6 0h7"/>',
       wand: wandPaths(ink),
-      eyedropper: '<path d="m12 9-8.4 8.4A2 2 0 0 0 3 18.8v1.4a2 2 0 0 0-.6 1.4 2 2 0 0 0 1.4.6h1.4a2 2 0 0 0 1.4-.6L15 12m3-3 .4.4a1 1 0 1 1-3 3l-3.8-3.8a1 1 0 1 1 3-3l.4.4 3.4-3.4a1 1 0 1 1 3 3zM2 22l.4-.4"/>',
+      // The loupe's lens: a ring around the pixel a click would take, as TypeR Studio's own sampler
+      eyedropper: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="1.6" fill="' + ink + '" stroke="none"/><path d="M12 1v3.5M12 19.5V23M1 12h3.5M19.5 12H23"/>',
     };
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${ink}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${paths[kind] || paths.crosshair}</svg>`;
-    const hotspot = kind === "crosshair" ? "12 12" : kind === "wand" ? "18 5" : "2 22";
+    const hotspot = kind === "wand" ? "18 5" : "12 12";
     return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${hotspot}, crosshair`;
   };
   // The cursor this code put on the stage, so it can be taken off again. Leaving it as an inline
@@ -6678,6 +6682,80 @@
     ui.stage.classList.toggle("is-cloning", cloning);
     if (cloning) hideStampPreview();
     showAdaptiveCursor(event);
+  };
+  // The eyedropper's loupe, as TypeR Studio's own has it: the page's pixels around the pointer,
+  // each one a square, the pixel under the pointer boxed, and its colour below. It follows the
+  // pointer, and what it shows is what a click takes.
+  const LOUPE_CELL = 12;
+  const LOUPE_SIDE = 11;
+  const LOUPE_REACH = (LOUPE_SIDE - 1) / 2;
+  let loupeShown = false;
+  let loupeAt = null;
+  const loupeIsOn = (event) => Boolean(app.doc) && !gesture && !spacing && (app.tool === "eyedropper" || isSampling(event)) && event.clientX !== undefined;
+  // The page's pixels as they show, so that the loupe and the colour taken agree: a text has its
+  // own rendering, and `ops.pickColor` paints a single pixel through the same path.
+  const loupePixels = (x, y) => ops.pickArea(x - LOUPE_REACH, y - LOUPE_REACH, LOUPE_SIDE, LOUPE_SIDE);
+  const hideLoupe = () => {
+    if (!loupeShown) return;
+    loupeShown = false;
+    loupeAt = null;
+    ui.loupe.hidden = true;
+  };
+  const drawLoupe = (event, point) => {
+    if (!loupeIsOn(event)) {
+      hideLoupe();
+      return;
+    }
+    const x = Math.floor(point[0]);
+    const y = Math.floor(point[1]);
+    const pixels = loupePixels(x, y);
+    if (!pixels) {
+      hideLoupe();
+      return;
+    }
+    const grid = ui.loupeGrid;
+    const ctx = grid.getContext("2d");
+    ctx.clearRect(0, 0, grid.width, grid.height);
+    for (let row = 0; row < LOUPE_SIDE; row++) {
+      for (let col = 0; col < LOUPE_SIDE; col++) {
+        const at = (row * LOUPE_SIDE + col) * 4;
+        const alpha = pixels[at + 3];
+        // Nothing there is the page's own emptiness: the checker under it says so
+        if (!alpha) {
+          ctx.fillStyle = (row + col) % 2 ? "#3a3a3a" : "#2a2a2a";
+        } else {
+          ctx.fillStyle = `rgb(${pixels[at]} ${pixels[at + 1]} ${pixels[at + 2]})`;
+        }
+        ctx.fillRect(col * LOUPE_CELL, row * LOUPE_CELL, LOUPE_CELL, LOUPE_CELL);
+      }
+    }
+    // The pixel a click would take: a black box with a white one inside it, for any colour
+    const mid = LOUPE_REACH * LOUPE_CELL;
+    ctx.strokeStyle = "#000";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(mid + 1, mid + 1, LOUPE_CELL - 2, LOUPE_CELL - 2);
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(mid + 0.5, mid + 0.5, LOUPE_CELL - 1, LOUPE_CELL - 1);
+    const at = (LOUPE_REACH * LOUPE_SIDE + LOUPE_REACH) * 4;
+    ui.loupeHex.textContent = pixels[at + 3] ? `#${[pixels[at], pixels[at + 1], pixels[at + 2]].map((value) => value.toString(16).padStart(2, "0")).join("")}` : "—";
+    // Below and to the right of the pointer, as the system's own magnifier is: the pixel under it
+    // stays in sight while it is read. Off the stage's edge, it goes to the other side.
+    const rect = ui.stage.getBoundingClientRect();
+    const box = ui.loupe.getBoundingClientRect();
+    const width = box.width || 144;
+    const height = box.height || 160;
+    const px = event.clientX - rect.left;
+    const py = event.clientY - rect.top;
+    let left = px + 18;
+    let top = py + 18;
+    if (left + width > rect.width - 4) left = px - 18 - width;
+    if (top + height > rect.height - 4) top = py - 18 - height;
+    ui.loupe.style.left = `${Math.max(4, left)}px`;
+    ui.loupe.style.top = `${Math.max(4, top)}px`;
+    ui.loupe.hidden = false;
+    loupeShown = true;
+    loupeAt = [x, y];
   };
   const pickAt = ([x, y], background) => {
     const color = ops.pickColor(x, y);
@@ -7238,6 +7316,9 @@
     }
     if ((tool === "eyedropper" || isSampling(event)) && !overGradientHandle(event)) {
       gesture = Object.assign(base, { kind: "pick", background: tool === "eyedropper" && event.altKey, slop: 0 });
+      // The press takes what the loupe showed: it goes with the click, and comes back on the
+      // next move, at the pixel the pointer has reached
+      hideLoupe();
       ui.stage.setPointerCapture(event.pointerId);
       pickAt(point, gesture.background);
       return;
@@ -7497,6 +7578,8 @@
     }
     if (multi) return;
     showSampling(event);
+    // The loupe reads the page at the pointer: the same pixels a click would take
+    drawLoupe(event, toDoc(event));
     const tool = app.tool;
     if (tool === "stamp" || tool === "healing") {
       stampState().pointer = toDoc(event);
@@ -7789,6 +7872,8 @@
     gesture = null;
     schedule(false);
     showSampling(event);
+    // A picked colour ends the loupe: the click is done, and nothing more is under the pointer
+    hideLoupe();
     setDrag("");
     hud(null);
     ui.stage.classList.remove("is-panning", "is-marquee");
@@ -7908,8 +7993,11 @@
   ui.stage.addEventListener("pointerleave", () => {
     hideBrushRing();
     hideStampPreview();
+    // The loupe shows what is under the pointer: gone from the page, it goes too
+    hideLoupe();
     hoverTextArea(null);
   });
+  ui.stage.addEventListener("pointercancel", () => hideLoupe());
   ui.stage.addEventListener("contextmenu", (event) => {
     // Ctrl + Space and a click is the zoom's, even where a Mac would see Ctrl + click
     // So is Ctrl on a handle, which sizes the letters

@@ -68,6 +68,8 @@
               <g id="text-marks"></g>
               <g id="type-marks"></g>
               <rect class="box" id="layer-box" hidden/>
+              <!-- The gradient's line keeps its own group: the handles above are rebuilt every frame -->
+              <g id="grad-marks"></g>
               <g id="handles"></g>
               <circle class="brush-ring brush-ring--under" id="brush-ring-under" hidden/>
               <circle class="brush-ring" id="brush-ring" hidden/>
@@ -78,6 +80,10 @@
           <canvas class="stamp-preview" id="stamp-preview" hidden></canvas>
           <div class="spread" id="spread-left" hidden><b>+</b><span></span></div>
           <div class="spread" id="spread-right" hidden><b>+</b><span></span></div>
+          <div class="loupe" id="loupe" hidden>
+            <canvas class="loupe__grid" id="loupe-grid" width="132" height="132"></canvas>
+            <span class="loupe__hex" id="loupe-hex">#000000</span>
+          </div>
           <div class="hud" id="hud" hidden></div>
           <div class="ctxbar" id="ctxbar" role="toolbar" hidden></div>
 

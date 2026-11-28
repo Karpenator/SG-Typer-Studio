@@ -3697,6 +3697,17 @@
   let scratchRing = null;
   // Where a layer's picture last went: during a stroke, the layers away from it cost nothing
   const visualBoxes = new WeakMap();
+  // One canvas for the eyedropper's samples, reused while the area stays the same size: a new
+  // canvas at every pointermove is what made the loupe's pixels crawl
+  let sampleCanvas = null;
+  const sampleAt = (width, height) => {
+    if (!sampleCanvas) sampleCanvas = newCanvas(width, height);
+    else if (sampleCanvas.width !== Math.max(1, Math.ceil(width)) || sampleCanvas.height !== Math.max(1, Math.ceil(height))) {
+      sampleCanvas.width = Math.max(1, Math.ceil(width));
+      sampleCanvas.height = Math.max(1, Math.ceil(height));
+    }
+    return sampleCanvas;
+  };
   // `rect` redoes only that part of a canvas that already shows this document: what a drag
   // changes on a page 10000 pixels tall is small, and the rest of the page costs nothing.
   // `screen`: the canvas the user sees, with the mask views on it.
@@ -9652,6 +9663,22 @@
       paintDoc(doc, ctx, { keep: true, x: -Math.floor(x), y: -Math.floor(y) });
       const px = ctx.getImageData(0, 0, 1, 1).data;
       return px[3] ? { r: px[0], g: px[1], b: px[2] } : null;
+    },
+    // The same pixels, as an area: the eyedropper's loupe shows what a click there would take,
+    // so both go through one painting path. RGBA bytes, row after row; nothing outside the page.
+    pickArea(left, top, width, height) {
+      const doc = app.doc;
+      if (!doc) return null;
+      const x = Math.floor(left);
+      const y = Math.floor(top);
+      const canvas = sampleAt(width, height);
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      // The canvas is the area, and only the area: what the last sample left in it goes first
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // The page is painted only where it is read: the rest of it is off the canvas anyway
+      paintDoc(doc, ctx, { keep: true, x: -x, y: -y, rect: { left: x, top: y, right: x + width, bottom: y + height } });
+      return ctx.getImageData(0, 0, width, height).data;
     },
     /* ---- text ---- */
     newText(x, y, value, box) {

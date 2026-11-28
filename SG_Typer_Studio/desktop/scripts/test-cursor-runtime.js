@@ -22,6 +22,11 @@ src += `
     ringShown: () => !ui.brushRing.hasAttribute("hidden"),
     ringClass: () => ui.stage.classList.contains("is-ring"),
     brushAt: () => { brushAt = [100, 100]; },
+    loupeShown: () => !ui.loupe.hidden,
+    loupeHex: () => ui.loupeHex.textContent,
+    drawLoupe: (event, point) => drawLoupe(event, point),
+    hideLoupe: () => hideLoupe(),
+    stageListeners: (type) => (window.__listeners["stage:" + type] || []),
   };
 })();
 `;
@@ -42,7 +47,7 @@ const el = (id) => new Proxy(({
   appendChild(n) { if (!this.firstChild) this.firstChild = n; this.childNodes.push(n); return n; },
   insertBefore() {}, removeChild() {}, replaceChildren() {}, remove() {}, firstChild: null, lastChild: null, children: [], childNodes: [],
   setAttributeNS() {}, getAttribute(k) { return this.attributes[k] ?? null; }, addEventListener(t, f) { (listeners[id + ":" + t] ||= []).push(f); },
-  getContext: () => ({ getImageData: () => ({ data: [255, 255, 255, 255] }), drawImage() {}, clearRect() {} }),
+  getContext: () => ({ getImageData: () => ({ data: [255, 255, 255, 255] }), drawImage() {}, clearRect() {}, fillRect() {}, strokeRect() {} }),
   getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 800 }),
   focus() {}, closest: () => null, querySelector: (sel) => el("q:" + sel),
 }), {
@@ -94,8 +99,14 @@ const window = {
     const textDefaults = { font: "ArialMT", family: "Arial", style: "Regular", size: 18, leading: 1.3, color: { r: 0, g: 0, b: 0 }, align: "left" };
     const app = { tool: "wand", docs: [], doc: null, brush: { size: 40, hardness: 100, opacity: 100, flow: 100, spacing: 10 }, fg: { r: 0, g: 0, b: 0 }, bg: { r: 255, g: 255, b: 255 }, selectionMode: "new", textDefaults, zoom: 1, view: { x: 0, y: 0, zoom: 1 } };
     // Reads that expect a list get one, everything else answers as a call
-    const ops = new Proxy({}, {
-      get: (t, k) => (/(Ids|areas|boxes|rows|list|all)$/.test(String(k)) ? empty : noop),
+    // The page's pixels, as the eyedropper reads them: one colour all through, so it reads back
+    const area = (left, top, width, height) => {
+      const data = new Uint8ClampedArray(Math.max(1, width) * Math.max(1, height) * 4);
+      for (let at = 0; at < data.length; at += 4) { data[at] = 51; data[at + 1] = 102; data[at + 2] = 153; data[at + 3] = 255; }
+      return data;
+    };
+    const ops = new Proxy({ pickArea: area }, {
+      get: (t, k) => (k in t ? t[k] : /(Ids|areas|boxes|rows|list|all)$/.test(String(k)) ? empty : noop),
     });
     const layer = new Proxy({}, { get: () => noop });
     const base = { app, ops, layer, announce() {}, on() {}, TEXT_LANGUAGES: ["en"], off() {}, paintDoc() {} };
@@ -106,7 +117,8 @@ const window = {
   location: { href: "file:///app/index.html", search: "" },
 };
 window.window = window;
-const sandbox = { window, document, navigator: window.navigator, localStorage: window.localStorage,
+window.__listeners = listeners;
+const sandbox = { window, document, lists: listeners, navigator: window.navigator, localStorage: window.localStorage,
   requestAnimationFrame: window.requestAnimationFrame, cancelAnimationFrame: window.cancelAnimationFrame,
   setTimeout, clearTimeout, setInterval, clearInterval, console, performance, Image: function () {}, Event: function () {}, CustomEvent: function () {},
   getComputedStyle: () => ({ getPropertyValue: () => "" }),
@@ -261,12 +273,35 @@ const pickerInput = () => {
   (listeners["window:keydown"] || []).slice().forEach((fn) => fn(key("Escape")));
 }
 
+// The eyedropper's loupe: the page's pixels in a square around the pointer, its colour under them.
+// It comes and goes with the pointer and with a click, and never stays behind.
+{
+  t.setTool("eyedropper");
+  t.showSampling(move({ clientX: 240, clientY: 200 }));
+  t.drawLoupe(move({ clientX: 240, clientY: 200 }), [240, 200]);
+  check("the loupe shows on the eyedropper", t.loupeShown());
+  check("the loupe reads the colour under the pointer", t.loupeHex() === "#336699", t.loupeHex());
+  // A press: the colour is taken, and the loupe goes with the click
+  t.hideLoupe();
+  check("a click takes the loupe with it", !t.loupeShown());
+  check("the loupe is told when the pointer leaves the stage", t.stageListeners("pointerleave").length > 0 && t.stageListeners("pointercancel").length > 0);
+  // A move takes it away when it is no longer the eyedropper's, and brings it back when it is
+  t.setTool("brush");
+  t.drawLoupe(move({ clientX: 240, clientY: 200 }), [240, 200]);
+  check("no loupe for a brush with Alt let go", !t.loupeShown());
+  t.setTool("eyedropper");
+  t.drawLoupe(move({ clientX: 240, clientY: 200 }), [240, 200]);
+  check("the loupe is back with the eyedropper", t.loupeShown());
+  t.setTool("brush");
+  t.drawLoupe(move({ clientX: 240, clientY: 200 }), [240, 200]);
+}
+
 const failed = checks.filter((ok) => !ok).length;
 console.log(`\n${checks.length - failed}/${checks.length} checks`);
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
 test("Every tool keeps a pointer on the stage when the mouse moves", () => {
-  assert.equal(checks.length, ALL.length + 19, "each tool was moved, Alt's meaning was watched, and so were the brush's ring and the Color Picker");
+  assert.equal(checks.length, ALL.length + 25, "each tool was moved, Alt's meaning was watched, and so were the brush's ring and the Color Picker");
   assert.equal(failed, 0, `${failed} of ${checks.length} checks failed`);
 });
