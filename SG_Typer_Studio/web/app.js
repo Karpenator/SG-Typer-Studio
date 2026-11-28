@@ -510,6 +510,10 @@
       if (modal.open) modal.close();
       cancelAnimationFrame(frame);
       frame = 0;
+      if (state.pickerKeys) {
+        window.removeEventListener("keydown", state.pickerKeys, true);
+        state.pickerKeys = null;
+      }
       sampleColorForPicker = null;
       // The picker is sampled with the stage's pointer and closes on its own OK or Cancel: no key
       // was let go then and the pointer doesn't move. Its eyedropper goes with its window.
@@ -528,20 +532,6 @@
     no.addEventListener("click", () => done(false));
     const addSwatch = make("button", "btn", right, T("Add to Swatches"));
     addSwatch.type = "button";
-    if (window.EyeDropper) {
-      const dropper = make("button", "btn", right, T("Pick from the screen"));
-      dropper.type = "button";
-      dropper.addEventListener("click", async () => {
-        try {
-          const picked = await new window.EyeDropper().open();
-          const c = fromHex(picked.sRGBHex);
-          setRgb(c.r, c.g, c.b);
-          changed();
-        } catch (error) {
-          // Esc: nothing was picked
-        }
-      });
-    }
     const cmyk = make("div", "picker__group", right);
     ["c", "m", "y", "k"].forEach((key, index) => addRow(cmyk, key, letters[3 + index], "%", 100));
 
@@ -679,22 +669,23 @@
       event.preventDefault();
       done(false);
     };
-    // Enter is OK, but on Cancel and the other buttons, which it presses. A swatch or the
-    // current colour is a colour chosen: Enter takes it.
-    modal.onkeydown = (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        done(false);
-        return;
-      }
-      if (event.key !== "Enter" || event.isComposing || (event.target.tagName === "BUTTON" && !event.target.closest(".picker__swatches, .picker__compare"))) return;
+    // The picker keeps Enter and Esc wherever the focus is: a colour sampled on the page, or a
+    // gradient end dragged there, leaves it outside the picker's own window. Enter is OK, but on
+    // Cancel and the other buttons, which it presses; a swatch or the current colour is a colour
+    // chosen, so Enter takes it.
+    const pickerKeys = (event) => {
+      if (event.key !== "Enter" && event.key !== "Escape") return;
+      if (event.key === "Enter" && (event.isComposing || (event.target.tagName === "BUTTON" && !event.target.closest(".picker__swatches, .picker__compare")))) return;
       event.preventDefault();
       event.stopPropagation();
-      done(true);
+      done(event.key === "Enter");
     };
-    // A non-modal dialog: the stage keeps its pointer and keyboard navigation. Its normal click
-    // is temporarily an eyedropper; Space, the middle button and Zoom retain their priority.
+    modal.onkeydown = null;
+    window.addEventListener("keydown", pickerKeys, true);
+    state.pickerKeys = pickerKeys;
+    // A non-modal dialog: the stage keeps its pointer and keyboard navigation. Outside the
+    // picker's own window the pointer is the eyedropper at once — no button to press first — and
+    // Space, the middle button and Zoom still keep their priority on the page.
     sampleColorForPicker = (color) => {
       setRgb(color.r, color.g, color.b);
       changed();
@@ -6640,6 +6631,9 @@
     cursorSet = value;
     ui.stage.style.cursor = value;
   };
+  // While the Color Picker is open the page is its eyedropper, but a gradient's ends keep their
+  // own drag: the pointer takes a handle first and only the rest of the page samples.
+  const overGradientHandle = (event) => Boolean(sampleColorForPicker) && app.tool === "gradient" && event.clientX !== undefined && Boolean(window.TypeRRetouch) && Boolean(window.TypeRRetouch.handleAt(event));
   const showAdaptiveCursor = (event) => {
     if (!app.doc || !hoverAt) return;
     const navigating = spacing || zoomHeld(event) || moveLent(event) || (gesture && (gesture.kind === "pan" || gesture.kind === "zoom"));
@@ -6648,7 +6642,7 @@
       return;
     }
     if (gesture || wandSetAside(event) || ui.stage.classList.contains("is-over-selection")) return;
-    const sampling = isSampling(event);
+    const sampling = isSampling(hoverAt) && !overGradientHandle(hoverAt);
     if (!sampling && !ADAPTIVE_CURSOR_TOOLS.has(app.tool)) {
       // Alt let go on a brush: the icon an Alt before it put there goes with it. The brush shows
       // its ring instead, as its class says (cursor: none).
@@ -6673,7 +6667,7 @@
   const showSampling = (event) => {
     showWandSetAside(event);
     ui.stage.classList.toggle("is-move-lent", gesture ? Boolean(gesture.lent) : ui.editor.hidden && moveLent(event));
-    ui.stage.classList.toggle("is-sampling", gesture ? gesture.kind === "pick" : isSampling(event));
+    ui.stage.classList.toggle("is-sampling", gesture ? gesture.kind === "pick" : isSampling(event) && !overGradientHandle(event));
     // A brush hides its own cursor behind the ring: the eyedropper's class stays, but the ring
     // must come with it, or the pointer has no face at all. Alt let go: the ring is the brush's.
     if (BRUSHING_TOOLS.has(app.tool) && !gesture) {
@@ -7242,7 +7236,7 @@
       beginZoom(base, event);
       return;
     }
-    if (tool === "eyedropper" || isSampling(event)) {
+    if ((tool === "eyedropper" || isSampling(event)) && !overGradientHandle(event)) {
       gesture = Object.assign(base, { kind: "pick", background: tool === "eyedropper" && event.altKey, slop: 0 });
       ui.stage.setPointerCapture(event.pointerId);
       pickAt(point, gesture.background);

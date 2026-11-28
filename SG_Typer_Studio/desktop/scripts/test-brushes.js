@@ -89,7 +89,8 @@ test("Ctrl + Alt + right-drag resizes the brush and is never a lent Move or a st
   // The colour picker's eyedropper goes with its window, which closes without a key being let go
   const picker = app.indexOf("if (closeColorPicker) closeColorPicker(true);", 400);
   assert.ok(picker > 0);
-  assert.ok(app.includes("frame = 0;\n      sampleColorForPicker = null;"), "the picker clears its sampling when it closes");
+  const closes = app.indexOf("sampleColorForPicker = null;", app.indexOf("const done = (keep) =>"));
+  assert.ok(closes > 0 && closes < app.indexOf("closeColorPicker = done;", closes), "the picker clears its sampling when it closes");
   // Alt on a brush is the eyedropper with the ring hidden, and let go it is the ring again
   assert.ok(app.includes('if (isSampling(event)) hideBrushRing();\n      else showBrushAtPointer();'), "Alt hides the ring, letting go brings it back");
   // The icon is an inline style: it must be taken off when Alt is let go, or no class can win

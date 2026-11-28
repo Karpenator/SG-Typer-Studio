@@ -220,3 +220,57 @@ test("Roman hanging punctuation is excluded from optical centring, not from ink 
   assert.ok(layout.box.left < layout.opticalBox.left);
   assert.equal(layout.box.right, layout.opticalBox.right);
 });
+
+// The document's text block is what Photoshop reads a text's kerning mode from: an anti-alias
+// change (or any other text edit) used to make psd.js ask ag-psd to invalidate text layers,
+// which drops the whole `Txt2` block — every text then opened in Metrics, and some files would
+// not open at all. A save must write that block, in the shape Photoshop writes it.
+const psdCanvas = (width, height) => {
+  const ctx = {
+    getImageData: (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h }),
+    createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h }),
+    putImageData() {}, drawImage() {}, fillRect() {},
+  };
+  return { width, height, getContext: () => ctx };
+};
+
+test("A save after a text edit keeps the document text block, block frames and style sheets whole", () => {
+  const agPsd = require(path.join(root, "web", "vendor", "ag-psd.js"));
+  agPsd.initializeCanvas(psdCanvas, (width, height) => ({ data: new Uint8ClampedArray(width * height * 4), width, height }));
+  // The switch that dropped the block must not be back
+  assert.ok(!read("web/psd.js").includes("invalidateTextLayers: flags.editedText"), "the save never invalidates text layers");
+  const style = { font: { name: "ArialMT" }, autoKern: "opticalKern", kerningMode: "opticalKern" };
+  const node = (aa, index, value = "AV") => ({
+    name: "T",
+    text: { text: value, index, styleRuns: [{ length: value.length + 1, style }], transform: [1, 0, 0, 1, 0, 0], antiAlias: aa, shapeType: "point" },
+    canvas: psdCanvas(20, 20), top: 0, left: 0, right: 20, bottom: 20,
+  });
+  const write = (children, previous) => {
+    const psd = { width: 20, height: 20, bitsPerChannel: 8, colorMode: 3, canvas: psdCanvas(20, 20), children, imageResources: { resolutionInfo: { horizontalResolution: 72, verticalResolution: 72 } } };
+    const block = Txt2.build(previous, children);
+    if (block) psd.engineData = block;
+    const bytes = agPsd.writePsdUint8Array(psd, { generateThumbnail: false, logMissingFeatures: false });
+    return agPsd.readPsd(bytes, { skipLayerImageData: true, skipCompositeImageData: true, skipThumbnail: true, logMissingFeatures: false });
+  };
+  // Written here, the block is Photoshop's shape: full style sheets, real frames, the mode at /11
+  const tree = Txt2.parse(Txt2.build(null, [node("sharp", 0)]));
+  const sheet = tree["1"]["1"][0]["0"]["6"]["0"][0]["0"]["0"]["6"];
+  assert.equal(sheet["11"], 2, "the optical mode is written");
+  assert.ok(Object.keys(sheet).length > 60, "the style sheet is Photoshop's own, not a stub");
+  const frame = JSON.stringify(tree["0"]["8"]["0"][0]);
+  assert.ok(frame.includes('"6":[-1,-1]') && frame.includes('"4":-1'), `a point frame, not a stub: ${frame}`);
+  // An anti-alias edit: the block still goes into the next file, and the mode is still read back
+  const first = write([node("sharp", 0), node("smooth", 1)], null);
+  const second = write([node("smooth", 0), node("smooth", 1)], first.engineData);
+  assert.ok(second.engineData, "the block survives the save that changed the anti-alias");
+  assert.deepEqual(second.children.map((child) => child.text.antiAlias), ["smooth", "smooth"]);
+  const params = { layerText: { textKey: "AV", textStyleRange: [{ from: 0, to: 2, textStyle: {} }] } };
+  Txt2.apply({ text: "AV", index: 0 }, second.engineData, params);
+  assert.equal(params.layerText.textStyleRange[0].textStyle.autoKern, "opticalKern", "Photoshop reads Optical, not Metrics");
+  // A text with no number of its own still gets one, so the block covers it
+  const added = write([node("smooth", undefined, "Hello")], second.engineData);
+  assert.ok(Number.isInteger(added.children[0].text.index) && added.children[0].text.index >= 0, "a new text is numbered");
+  const fresh = { layerText: { textKey: "Hello", textStyleRange: [{ from: 0, to: 5, textStyle: {} }] } };
+  Txt2.apply(added.children[0].text, added.engineData, fresh);
+  assert.equal(fresh.layerText.textStyleRange[0].textStyle.autoKern, "opticalKern", "a new text keeps its mode too");
+});

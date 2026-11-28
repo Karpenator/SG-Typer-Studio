@@ -272,6 +272,49 @@
     return run;
   }
 
+  // Photoshop's own style sheet has 96 keys; the run written for a text with no sheet of its own
+  // must be shaped like it, not like a stub: a text object built on a bare `<< /0 0 /11 mode >>`
+  // made Photoshop refuse the file, and a style sheet short of Photoshop's keys came back with
+  // the text set in its defaults. The numbers here are Photoshop 2026's own Normal RGB sheet,
+  // key for key (see photocraft's `psd/build.rs`, which was read off files it saved).
+  const FULL_SHEET = {
+    "0": 1, "1": 12, "2": false, "3": false, "4": true, "5": 0, "6": 1, "7": 1, "8": 0,
+    "9": 0, "10": 0, "11": 1, "12": 0, "13": 0, "14": 0, "15": 0, "16": 0, "17": 0, "18": true,
+    "19": false, "20": false, "21": false, "22": false, "23": false, "24": false, "25": false,
+    "26": false, "27": false, "28": false, "29": false, "30": 0, "31": false, "32": false,
+    "33": false, "34": false, "35": 2, "36": 0, "37": 2, "38": 0, "39": 0, "40": false, "41": 2,
+    "42": 0, "43": { "0": 0.5 }, "44": 2, "45": 2, "46": 7, "47": 0, "48": 0, "49": -1, "50": -1,
+    "51": 0, "52": false,
+    "53": { "99": { type: "name", value: "SimplePaint" }, "0": { "0": 1, "1": [1, 0, 0, 0] } },
+    "54": { "99": { type: "name", value: "SimplePaint" }, "0": { "0": 1, "1": [1, 0, 0, 0] } },
+    "55": { "99": { type: "name", value: "SimpleBlender" } },
+    "56": true, "57": false, "58": true, "59": false, "60": false, "61": 0, "62": 0, "63": 1,
+    "64": 4, "65": 0, "66": [], "67": [], "68": 0, "69": 0, "70": 0, "71": 4, "72": 0, "73": 0,
+    "74": false, "75": false, "76": false, "77": true, "78": true,
+    "79": { "99": { type: "name", value: "SimplePaint" }, "0": { "0": 1, "1": [1, 1, 1, 0] } },
+    "80": false, "81": 0, "82": 3, "83": 3, "84": false, "85": 0,
+    "86": { "99": { type: "name", value: "SimpleCustomFeature" } },
+    "87": 100, "88": true, "91": 8, "92": 0, "95": { "0": 0, "1": 0 }, "96": true,
+  };
+  // A frame a point text is drawn in, as Photoshop 2026 writes it since the block's version 14:
+  // `<< /0 << /2 << /6 [ -1.0 -1.0 ] /11 << /4 -1 /18 -1.0 /22 .025 >> >> >> >>`. A stub frame
+  // (`<< /0 << >> >>`) was what made Photoshop and Photopea refuse a file whose text object named it.
+  const pointFrame = () => ({ "0": { "2": { "6": [-1, -1], "11": { "4": -1, "18": -1, "22": 0.025 } } } });
+  // A box text's frame: its rectangle as four straight sides from the top left, clockwise.
+  const boxFrame = (box) => {
+    const [left, top, right, bottom] = (box || [0, 0, 0, 0]).map((value) => (Number.isFinite(value) ? value : 0));
+    const corners = [[left, top], [right, top], [right, bottom], [left, bottom], [left, top]];
+    const path = [];
+    for (let k = 0; k < 4; k++) path.push(...corners[k], ...corners[k], ...corners[k + 1], ...corners[k + 1]);
+    return { "0": { "1": { "0": path }, "2": { "0": 1, "6": [-2, -2], "10": { "0": 2, "1": 0 }, "11": { "4": -2, "18": -2, "22": 0.025 } } } };
+  };
+  // A model with no style runs of its own: Photoshop's own sheet, its kerning at `mode`
+  const fullRun = (mode, length) => {
+    const sheet = clone(FULL_SHEET);
+    sheet["11"] = mode;
+    return { "0": { "0": { "0": string(""), "6": sheet } }, "1": length };
+  };
+
   function build(previous, nodes) {
     let root = null;
     try { root = parse(previous); } catch (_) { root = null; }
@@ -302,12 +345,16 @@
       const engineText = String(text.text || "").replace(/\r\n?|\n/g, "\r") + "\r";
       let object = slots[index] ? clone(slots[index]) : null;
       let model = object && object["0"];
-      if (!model || typeof model !== "object") {
+      // A model is only usable when it is shaped as Photoshop writes one: a text, paragraph runs
+      // and a style run container. A stub (a bare `<< /0 text /6 runs >>`) made Photoshop quit on
+      // the file, so it is built afresh instead of extended.
+      if (!model || typeof model !== "object" || !model["0"] || !model["0"].type || !model["5"] || !model["5"]["0"] || !model["6"]) {
         const paragraphs = [];
         engineText.split(/(?<=\r)/).filter(Boolean).forEach((part) => paragraphs.push({ "0": {}, "1": part.length }));
         model = { "0": string(engineText), "5": { "0": paragraphs }, "6": { "0": [] } };
-        object = { "0": model, "1": { "0": [{ "0": index }] } };
+        object = null;
       }
+      if (!object) object = { "0": model, "1": { "0": [{ "0": index }] } };
       const oldRuns = model["6"] && model["6"]["0"];
       const modes = modeRuns(text);
       const rebuilt = [];
@@ -320,7 +367,9 @@
           const baseLength = base ? Number(base["1"]) || 0 : 0;
           if (base && oldOffset >= baseLength) { oldIndex++; oldOffset = 0; continue; }
           const take = base ? Math.min(left, baseLength - oldOffset) : left;
-          rebuilt.push(freshRun(mode, take, base || null));
+          // A stub run (no style sheet of its own) gets Photoshop's full sheet; one the file wrote
+          // keeps every key it had, only its kerning replaced.
+          rebuilt.push(base ? freshRun(mode, take, base) : fullRun(mode, take));
           left -= take;
           if (base) oldOffset += take;
         }
@@ -334,7 +383,17 @@
     if (!texts.length) return previous;
     if (!previous && !texts.some((node) => modeRuns(node.text).some((run) => run.mode === 2))) return previous;
     if (native && root["0"] && root["0"]["8"] && Array.isArray(root["0"]["8"]["0"])) {
-      while (root["0"]["8"]["0"].length < slots.length) root["0"]["8"]["0"].push({ "0": {} });
+      // Every text object names a frame, and Photoshop indexes them by object number: a frame
+      // that is a stub made it refuse the file. The ones written here are point frames, and the
+      // box of a text it is a box for.
+      const boxes = new Map(texts.map((node) => [node.text.index, node.text]));
+      const frames = root["0"]["8"]["0"];
+      while (frames.length < slots.length) frames.push(pointFrame());
+      frames.forEach((frame, at) => {
+        if (frame && frame["0"] && Object.keys(frame["0"]).length) return;
+        const text = boxes.get(at);
+        frames[at] = text && text.shapeType === "box" && text.boxBounds ? boxFrame(text.boxBounds) : pointFrame();
+      });
     }
     return base64FromBytes(serialize(root));
   }

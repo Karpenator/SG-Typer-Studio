@@ -727,7 +727,11 @@
     const spin = (layer.rotated && layer.spin) || [1, 0, 0, 1];
     const out = {
       text: value,
-      index: layer.textIndex,
+      // Its place in the document's text block. A text from a file keeps the one it had there;
+      // a text made here gets its own, past the ones the file named, so that the block written
+      // for the save covers it (a text with no number is dropped from the block, and Photoshop
+      // would read it in Metrics).
+      index: Number.isInteger(layer.textIndex) && layer.textIndex >= 0 ? layer.textIndex : undefined,
       transform: [spin[0], spin[1], spin[2], spin[3], (lt.textClickPoint.horizontal / 100) * doc.width, (lt.textClickPoint.vertical / 100) * doc.height],
       antiAlias: ANTI_ALIAS_OUT[lt.antiAlias] || "smooth",
       shapeType: box ? "box" : "point",
@@ -1158,7 +1162,15 @@
     if (xmp === undefined) delete imageResources.xmpMetadata;
     else imageResources.xmpMetadata = xmp;
     const root = Object.assign({}, source, { width: doc.width, height: doc.height, bitsPerChannel: 8, canvas: composite, children, imageResources });
-    if (window.TypeRTxt2) root.engineData = window.TypeRTxt2.build(source.engineData, children);
+    // The document's text block: every text's kerning mode lives only here, as Photoshop has it.
+    // A save that wrote a new text, or changed one, must carry it — a file whose block was
+    // dropped opened with every text in Metrics, and one whose block lost the shape Photoshop
+    // writes would not open at all. A file that had no block and needs none keeps none.
+    if (window.TypeRTxt2) {
+      const built = window.TypeRTxt2.build(source.engineData, children);
+      if (built) root.engineData = built;
+      else delete root.engineData;
+    }
     if (!root.colorMode) root.colorMode = 3;
     // A greyscale file given colour here (a Gradient, a coloured text, a pasted picture…) goes
     // on in RGB, as Photoshop's Image > Mode > RGB Color would: in greyscale it would get only
@@ -1181,7 +1193,11 @@
       if (!root.linkedFiles.length) delete root.linkedFiles;
     }
     const psb = /\.psb$/i.test(target) || doc.width > 30000 || doc.height > 30000;
-    const options = { psb, invalidateTextLayers: flags.editedText, trimImageData: true, noBackground: !(bottom && bottom.isBackground), logMissingFeatures: false };
+    // Never `invalidateTextLayers`: it makes ag-psd drop the document's `Txt2` block, and that
+    // block is the only place Photoshop keeps a text's kerning mode — a save after any text edit
+    // then had every text open in Metrics, or the file not open at all, the layer's own engine
+    // data saying nothing of the mode. `root.engineData` above carries each text's mode instead.
+    const options = { psb, trimImageData: true, noBackground: !(bottom && bottom.isBackground), logMissingFeatures: false };
     if (await startWorker()) {
       try {
         const transfer = [];

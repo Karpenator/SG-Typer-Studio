@@ -1015,6 +1015,9 @@
     cancel(gesture) {
       if (gesture && gesture.kind === "retouch") this.up(gesture, null, null, true);
     },
+    // The end or the middle of the gradient under the pointer, if any: its own drag, even while
+    // the Color Picker is open and the rest of the page is the eyedropper
+    handleAt: (event) => handleAt(event),
     hover(event) {
       if (app.tool !== "gradient") return;
       const handle = handleAt(event);

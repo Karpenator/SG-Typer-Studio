@@ -18,6 +18,7 @@ src = src.slice(0, src.lastIndexOf("})();"));
 src += `
   window.__test = {
     setTool, showSampling, ui, app,
+    openColorPicker, isSampling,
     ringShown: () => !ui.brushRing.hasAttribute("hidden"),
     ringClass: () => ui.stage.classList.contains("is-ring"),
     brushAt: () => { brushAt = [100, 100]; },
@@ -65,6 +66,7 @@ const document = {
 };
 const window = {
   addEventListener(t, f) { (listeners["window:" + t] ||= []).push(f); },
+  removeEventListener(t, f) { const list = listeners["window:" + t] || []; const at = list.indexOf(f); if (at >= 0) list.splice(at, 1); },
   matchMedia: () => ({ matches: false, addEventListener() {} }),
   requestAnimationFrame: () => 1, cancelAnimationFrame() {}, setTimeout, clearTimeout, setInterval, clearInterval,
   innerWidth: 1400, innerHeight: 900, devicePixelRatio: 1,
@@ -195,12 +197,76 @@ t.showSampling(move());
 check("Alt let go: the eyedropper's class is off at once", !t.ui.stage.classList.contains("is-sampling"));
 check("Alt let go: the ring is back", t.ringShown() && t.ringClass());
 
+// The Color Picker: no "Pick from the screen" button, and its window takes Enter and Esc wherever
+// the focus is — a colour sampled on the page leaves it there. Closing it always clears sampling.
+const pickerInput = () => {
+  const input = el("picker-input");
+  input.type = "color";
+  input.value = "#336699";
+  input.title = "Start Color";
+  return input;
+};
+{
+  const input = pickerInput();
+  t.openColorPicker(input);
+  const labels = [];
+  const walk = (node) => {
+    if (!node || !node.childNodes) return;
+    (node.childNodes || []).forEach((child) => {
+      if (child) {
+        if (child.textContent) labels.push(String(child.textContent));
+        walk(child);
+      }
+    });
+  };
+  walk(t.ui.modal);
+  check("the picker has no screen-picking button", !labels.some((text) => /Pick from the screen/i.test(text)));
+  check("the picker samples as soon as it is open", Boolean(t.isSampling({ clientX: 10, clientY: 10 })));
+  const keys = listeners["window:keydown"] || [];
+  // The list is spliced as listeners go, so its length is taken before the keys are sent
+  const open = keys.length;
+  check("the picker listens for the keyboard itself", open > 0);
+  // Enter and Esc are the picker's wherever the focus is: every listener sees the key, and the
+  // picker's own closes the window and takes its listeners with it.
+  const key = (name, target) => ({ key: name, preventDefault() {}, stopPropagation() {}, target: target || { tagName: "INPUT", closest: () => null } });
+  keys.slice().forEach((fn) => fn(key("Enter")));
+  // Only the picker's own handler takes itself off: that is its window closing
+  check("Enter closes the picker", (listeners["window:keydown"] || []).length === open - 1);
+  check("closing the picker clears its sampling", !t.isSampling({ clientX: 10, clientY: 10 }));
+  // Esc, reopened: the same through the cancel path
+  t.openColorPicker(pickerInput());
+  const again = (listeners["window:keydown"] || []).length;
+  (listeners["window:keydown"] || []).slice().forEach((fn) => fn(key("Escape")));
+  check("Esc closes the picker", (listeners["window:keydown"] || []).length === again - 1);
+  check("Esc clears its sampling", !t.isSampling({ clientX: 10, clientY: 10 }));
+  // The gradient's ends stay draggable while the picker is open: over one, the page is not the
+  // picker's eyedropper, and the tool's own drag takes the click.
+  t.openColorPicker(pickerInput());
+  const retouch = sandbox.window.TypeRRetouch;
+  const was = retouch.handleAt;
+  let asked = null;
+  sandbox.window.TypeRRetouch = new Proxy(Object.assign({}, was === undefined ? {} : {}, {
+    handleAt: (event) => { asked = event; return "end"; },
+    sampled: () => false,
+    hover() {},
+    toolChosen() {},
+  }), { get: (target, key) => (key in target ? target[key] : () => {}) });
+  t.setTool("gradient");
+  t.showSampling(move({ clientX: 40, clientY: 40 }));
+  check("over a gradient end, the picker's eyedropper is off", !t.ui.stage.classList.contains("is-sampling") && Boolean(asked));
+  sandbox.window.TypeRRetouch = new Proxy({ handleAt: () => null, sampled: () => false, hover() {}, toolChosen() {} }, { get: (target, key) => (key in target ? target[key] : () => {}) });
+  t.showSampling(move({ clientX: 60, clientY: 60 }));
+  check("away from the ends, the page is the picker's eyedropper again", t.ui.stage.classList.contains("is-sampling"));
+  t.setTool("brush");
+  (listeners["window:keydown"] || []).slice().forEach((fn) => fn(key("Escape")));
+}
+
 const failed = checks.filter((ok) => !ok).length;
 console.log(`\n${checks.length - failed}/${checks.length} checks`);
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
 test("Every tool keeps a pointer on the stage when the mouse moves", () => {
-  assert.equal(checks.length, ALL.length + 10, "each tool was moved, Alt's meaning was watched, and so was the brush's ring");
+  assert.equal(checks.length, ALL.length + 19, "each tool was moved, Alt's meaning was watched, and so were the brush's ring and the Color Picker");
   assert.equal(failed, 0, `${failed} of ${checks.length} checks failed`);
 });
